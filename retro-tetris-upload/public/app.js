@@ -1,0 +1,563 @@
+const COLS = 10;
+const ROWS = 20;
+const BLOCK = 24;
+const COLORS = ["#000000", "#5b6ee1", "#6abe30", "#d9a441", "#ac3232", "#5fcde4", "#d95763", "#8f563b", "#f8f8d8"];
+const PIECES = {
+  I: [[1, 1, 1, 1]],
+  O: [[2, 2], [2, 2]],
+  T: [[0, 3, 0], [3, 3, 3]],
+  S: [[0, 4, 4], [4, 4, 0]],
+  Z: [[5, 5, 0], [0, 5, 5]],
+  J: [[6, 0, 0], [6, 6, 6]],
+  L: [[0, 0, 7], [7, 7, 7]]
+};
+const ids = (id) => document.getElementById(id);
+const tokenKey = "retroTetrisToken";
+const localUsersKey = "retroTetrisLocalUsers";
+const localFriendsKey = "retroTetrisLocalFriends";
+
+let token = localStorage.getItem(tokenKey);
+let me = null;
+let socket = null;
+let mode = "single";
+let playerGame = null;
+let opponentGame = null;
+let animationId = null;
+let computerTimer = null;
+let socketScriptPromise = null;
+
+class TetrisGame {
+  constructor(canvas, options = {}) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.options = options;
+    this.reset();
+  }
+
+  reset() {
+    this.board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+    this.score = 0;
+    this.lines = 0;
+    this.dropCounter = 0;
+    this.dropInterval = this.options.ai ? 520 : 720;
+    this.dead = false;
+    this.paused = false;
+    this.piece = this.newPiece();
+    this.draw();
+  }
+
+  newPiece() {
+    const keys = Object.keys(PIECES);
+    const type = keys[Math.floor(Math.random() * keys.length)];
+    const matrix = PIECES[type].map((row) => [...row]);
+    return { matrix, x: Math.floor(COLS / 2) - Math.ceil(matrix[0].length / 2), y: 0 };
+  }
+
+  collide(piece = this.piece) {
+    return piece.matrix.some((row, y) => row.some((value, x) => {
+      if (!value) return false;
+      const nx = piece.x + x;
+      const ny = piece.y + y;
+      return nx < 0 || nx >= COLS || ny >= ROWS || (ny >= 0 && this.board[ny][nx]);
+    }));
+  }
+
+  merge() {
+    this.piece.matrix.forEach((row, y) => row.forEach((value, x) => {
+      if (value) this.board[this.piece.y + y][this.piece.x + x] = value;
+    }));
+  }
+
+  rotate() {
+    const matrix = this.piece.matrix[0].map((_, i) => this.piece.matrix.map((row) => row[i]).reverse());
+    const old = this.piece.matrix;
+    this.piece.matrix = matrix;
+    let offset = 1;
+    while (this.collide()) {
+      this.piece.x += offset;
+      offset = -(offset + (offset > 0 ? 1 : -1));
+      if (Math.abs(offset) > matrix[0].length + 1) {
+        this.piece.matrix = old;
+        return;
+      }
+    }
+    this.changed();
+  }
+
+  move(dir) {
+    this.piece.x += dir;
+    if (this.collide()) this.piece.x -= dir;
+    this.changed();
+  }
+
+  softDrop() {
+    this.piece.y++;
+    if (this.collide()) {
+      this.piece.y--;
+      this.lock();
+      return true;
+    }
+    this.changed();
+    return false;
+  }
+
+  hardDrop() {
+    while (!this.softDrop()) {}
+  }
+
+  lock() {
+    this.merge();
+    const cleared = this.clearLines();
+    if (cleared >= 2 && this.options.onAttack) this.options.onAttack(1);
+    this.piece = this.newPiece();
+    if (this.collide()) {
+      this.dead = true;
+      this.options.onDead?.();
+    }
+    this.changed();
+  }
+
+  clearLines() {
+    let cleared = 0;
+    outer: for (let y = ROWS - 1; y >= 0; y--) {
+      for (let x = 0; x < COLS; x++) if (!this.board[y][x]) continue outer;
+      this.board.splice(y, 1);
+      this.board.unshift(Array(COLS).fill(0));
+      cleared++;
+      y++;
+    }
+    if (cleared) {
+      this.lines += cleared;
+      this.score += [0, 100, 300, 500, 800][cleared] || cleared * 300;
+      this.dropInterval = Math.max(120, this.dropInterval - cleared * 8);
+    }
+    return cleared;
+  }
+
+  addGarbage(rows = 1) {
+    for (let i = 0; i < rows; i++) {
+      this.board.shift();
+      const hole = Math.floor(Math.random() * COLS);
+      this.board.push(Array.from({ length: COLS }, (_, x) => (x === hole ? 0 : 8)));
+    }
+    if (this.collide()) {
+      this.dead = true;
+      this.options.onDead?.();
+    }
+    this.changed();
+  }
+
+  update(delta) {
+    if (this.dead || this.paused) return;
+    this.dropCounter += delta;
+    if (this.dropCounter > this.dropInterval) {
+      this.softDrop();
+      this.dropCounter = 0;
+    }
+  }
+
+  aiStep() {
+    if (this.dead) return;
+    const target = this.bestMove();
+    if (this.piece.x < target.x) this.move(1);
+    else if (this.piece.x > target.x) this.move(-1);
+    else if (target.rotations-- > 0) this.rotate();
+    else this.hardDrop();
+  }
+
+  bestMove() {
+    let best = { score: Infinity, x: this.piece.x, rotations: 0 };
+    let testMatrix = this.piece.matrix.map((r) => [...r]);
+    for (let r = 0; r < 4; r++) {
+      for (let x = -2; x < COLS; x++) {
+        const testPiece = { matrix: testMatrix, x, y: 0 };
+        while (!this.collide(testPiece)) testPiece.y++;
+        testPiece.y--;
+        if (testPiece.y < 0) continue;
+        const score = this.scoreLanding(testPiece);
+        if (score < best.score) best = { score, x, rotations: r };
+      }
+      testMatrix = testMatrix[0].map((_, i) => testMatrix.map((row) => row[i]).reverse());
+    }
+    return best;
+  }
+
+  scoreLanding(piece) {
+    const clone = this.board.map((r) => [...r]);
+    piece.matrix.forEach((row, y) => row.forEach((value, x) => {
+      if (value && piece.y + y >= 0 && piece.x + x >= 0 && piece.x + x < COLS) clone[piece.y + y][piece.x + x] = value;
+    }));
+    const heights = Array(COLS).fill(0);
+    let holes = 0;
+    for (let x = 0; x < COLS; x++) {
+      let seen = false;
+      for (let y = 0; y < ROWS; y++) {
+        if (clone[y][x]) {
+          if (!seen) heights[x] = ROWS - y;
+          seen = true;
+        } else if (seen) holes++;
+      }
+    }
+    return Math.max(...heights) * 2 + holes * 7 + heights.reduce((s, h, i) => s + (i ? Math.abs(h - heights[i - 1]) : 0), 0);
+  }
+
+  changed() {
+    this.draw();
+    this.options.onChange?.(this.snapshot());
+  }
+
+  snapshot() {
+    return { board: this.board, piece: this.piece, score: this.score, lines: this.lines, dead: this.dead };
+  }
+
+  loadSnapshot(state) {
+    this.board = state.board;
+    this.piece = state.piece;
+    this.score = state.score || 0;
+    this.lines = state.lines || 0;
+    this.dead = !!state.dead;
+    this.draw();
+  }
+
+  draw() {
+    this.ctx.fillStyle = "#0b0b12";
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    this.drawMatrix(this.board, 0, 0);
+    if (this.piece && !this.dead) this.drawMatrix(this.piece.matrix, this.piece.x, this.piece.y);
+    if (this.dead) {
+      this.ctx.fillStyle = "rgba(0,0,0,.72)";
+      this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      this.ctx.fillStyle = "#f8f8d8";
+      this.ctx.font = "bold 24px Courier New";
+      this.ctx.textAlign = "center";
+      this.ctx.fillText("GAME OVER", this.canvas.width / 2, this.canvas.height / 2);
+    }
+  }
+
+  drawMatrix(matrix, ox, oy) {
+    matrix.forEach((row, y) => row.forEach((value, x) => {
+      if (!value) return;
+      const px = (x + ox) * BLOCK;
+      const py = (y + oy) * BLOCK;
+      this.ctx.fillStyle = COLORS[value];
+      this.ctx.fillRect(px, py, BLOCK, BLOCK);
+      this.ctx.strokeStyle = "#f8f8d8";
+      this.ctx.lineWidth = 2;
+      this.ctx.strokeRect(px + 1, py + 1, BLOCK - 2, BLOCK - 2);
+      this.ctx.fillStyle = "rgba(0,0,0,.25)";
+      this.ctx.fillRect(px + BLOCK - 6, py + 4, 3, BLOCK - 8);
+    }));
+  }
+}
+
+function setStatus(message) { ids("status").textContent = message; }
+function show(id) {
+  ["menu", "multiMenu", "humanMenu", "arena"].forEach((name) => ids(name).classList.toggle("hidden", name !== id));
+}
+
+function api(path, body) {
+  if (isStaticHost()) return localApi(path, body);
+  return fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body)
+  }).then(async (res) => {
+    const data = await safeJson(res);
+    if (!res.ok) throw new Error(data.error || "Request failed.");
+    return data;
+  });
+}
+
+function safeJson(res) {
+  return res.text().then((text) => {
+    try { return JSON.parse(text); }
+    catch { return { error: text || "Server did not return JSON." }; }
+  });
+}
+
+function isStaticHost() {
+  return location.protocol === "file:" || location.hostname.endsWith("github.io") || location.hostname.endsWith("chatgpt.site");
+}
+
+function loadLocalUsers() {
+  return JSON.parse(localStorage.getItem(localUsersKey) || "{}");
+}
+
+function saveLocalUsers(users) {
+  localStorage.setItem(localUsersKey, JSON.stringify(users));
+}
+
+function loadLocalFriends() {
+  return JSON.parse(localStorage.getItem(localFriendsKey) || "{}");
+}
+
+function saveLocalFriends(friends) {
+  localStorage.setItem(localFriendsKey, JSON.stringify(friends));
+}
+
+function localApi(path, body) {
+  const users = loadLocalUsers();
+  const username = String(body?.username || "").trim().toLowerCase();
+  if (path === "/api/register") {
+    if (!/^[a-z0-9_]{3,16}$/.test(username)) return Promise.reject(new Error("Use 3-16 letters, numbers, or underscores."));
+    if (users[username]) return Promise.reject(new Error("That username is taken on this browser."));
+    users[username] = { username, password: String(body.password || ""), createdAt: Date.now() };
+    saveLocalUsers(users);
+    return Promise.resolve({ token: `local:${username}`, user: { username } });
+  }
+  if (path === "/api/login") {
+    if (!users[username] || users[username].password !== String(body.password || "")) return Promise.reject(new Error("Bad local username or password."));
+    return Promise.resolve({ token: `local:${username}`, user: { username } });
+  }
+  if (path === "/api/friends/request") {
+    const current = token?.replace("local:", "");
+    if (!current) return Promise.reject(new Error("Create or login to a local demo account first."));
+    if (!users[username]) return Promise.reject(new Error("That local demo user does not exist in this browser."));
+    const friends = loadLocalFriends();
+    friends[current] = [...new Set([...(friends[current] || []), username])];
+    friends[username] = [...new Set([...(friends[username] || []), current])];
+    saveLocalFriends(friends);
+    return Promise.resolve({ ok: true });
+  }
+  return Promise.reject(new Error("This action needs the Node realtime server."));
+}
+
+async function refreshMe() {
+  if (!token) return;
+  if (token.startsWith("local:")) {
+    const username = token.replace("local:", "");
+    const friends = (loadLocalFriends()[username] || []).map((name) => ({ username: name }));
+    me = { username };
+    ids("authForm").classList.add("hidden");
+    ids("signedIn").classList.remove("hidden");
+    ids("signedName").textContent = `${username} local`;
+    renderSocial({ incoming: [], outgoing: [], friends });
+    setStatus("GitHub Pages mode: singleplayer and vs computer are playable. Realtime human matchmaking needs the Node server.");
+    return;
+  }
+  const res = await fetch("/api/me", { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return logout();
+  const data = await res.json();
+  me = data.user;
+  ids("authForm").classList.add("hidden");
+  ids("signedIn").classList.remove("hidden");
+  ids("signedName").textContent = me.username;
+  renderSocial(data);
+  connectSocket();
+}
+
+function renderSocial(data) {
+  ids("incoming").innerHTML = data.incoming.map((r) => `<div class="friend-line"><span>${r.from} wants in</span><button data-accept="${r.from}">Accept</button></div>`).join("");
+  ids("friends").innerHTML = data.friends.length
+    ? data.friends.map((f) => `<div class="friend-line"><span>${f.username}</span><button data-challenge="${f.username}">Challenge</button></div>`).join("")
+    : `<p class="notice">No friends yet.</p>`;
+}
+
+function logout() {
+  token = null;
+  me = null;
+  localStorage.removeItem(tokenKey);
+  ids("authForm").classList.remove("hidden");
+  ids("signedIn").classList.add("hidden");
+  if (socket) socket.disconnect();
+}
+
+async function connectSocket() {
+  if (typeof io === "undefined") {
+    if (isStaticHost()) {
+      setStatus("Realtime human play needs the Node server. Use vs Computer on GitHub Pages.");
+      return false;
+    }
+    try {
+      await loadSocketScript();
+    } catch {
+      setStatus("Could not load the realtime server. Use singleplayer or vs computer for now.");
+      return false;
+    }
+  }
+  if (socket?.connected) return true;
+  socket = io({ auth: { token } });
+  socket.on("quick:waiting", () => setStatus("Waiting for another quick play challenger..."));
+  socket.on("match:start", ({ opponent }) => startHumanMatch(opponent));
+  socket.on("opponent:state", (state) => {
+    if (!opponentGame) opponentGame = new TetrisGame(ids("opponentBoard"));
+    opponentGame.loadSnapshot(state);
+    ids("opponentStatus").textContent = state.dead ? "Out" : "Playing";
+  });
+  socket.on("opponent:attack", ({ rows }) => playerGame?.addGarbage(rows));
+  socket.on("match:win", ({ reason }) => endMatch(`You win: ${reason}.`));
+  socket.on("match:lose", ({ reason }) => endMatch(`You lose: ${reason}.`));
+  socket.on("challenge:incoming", (challenge) => {
+    setStatus(`${challenge.from} challenged you.`);
+    ids("incoming").insertAdjacentHTML("afterbegin", `<div class="friend-line"><span>${challenge.from} challenged you</span><button data-accept-challenge="${challenge.id}">Fight</button></div>`);
+  });
+  socket.on("notice", ({ message }) => setStatus(message));
+  return true;
+}
+
+function loadSocketScript() {
+  if (socketScriptPromise) return socketScriptPromise;
+  socketScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/socket.io/socket.io.js";
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+  return socketScriptPromise;
+}
+
+function startSingle() {
+  mode = "single";
+  ids("opponentCard").classList.add("hidden");
+  ids("matchLabel").textContent = "Singleplayer";
+  startArena("Singleplayer ready.");
+}
+
+function startComputer() {
+  mode = "computer";
+  ids("opponentCard").classList.remove("hidden");
+  ids("opponentName").textContent = "CPU";
+  ids("matchLabel").textContent = "Vs Computer";
+  startArena("Clear 2+ rows to add garbage to the CPU.");
+  opponentGame = new TetrisGame(ids("opponentBoard"), {
+    ai: true,
+    onAttack: (rows) => playerGame.addGarbage(rows),
+    onDead: () => endMatch("You win: CPU topped out.")
+  });
+  computerTimer = setInterval(() => opponentGame.aiStep(), 260);
+}
+
+function startHumanMatch(opponent) {
+  mode = "human";
+  ids("opponentCard").classList.remove("hidden");
+  ids("opponentName").textContent = opponent;
+  ids("matchLabel").textContent = `Vs ${opponent}`;
+  startArena("Fight started. Clear 2+ rows to send one garbage row.");
+}
+
+function startArena(message) {
+  stopLoops();
+  show("arena");
+  setStatus(message);
+  ids("score").textContent = "0";
+  ids("lines").textContent = "0";
+  ids("opponentStatus").textContent = "Ready";
+  opponentGame = mode === "single" ? null : opponentGame;
+  playerGame = new TetrisGame(ids("playerBoard"), {
+    onAttack: (rows) => {
+      if (mode === "human") socket?.emit("game:attack", { rows });
+      if (mode === "computer") opponentGame?.addGarbage(rows);
+    },
+    onChange: (state) => {
+      ids("score").textContent = state.score;
+      ids("lines").textContent = state.lines;
+      if (mode === "human") socket?.emit("game:state", state);
+    },
+    onDead: () => {
+      if (mode === "human") socket?.emit("game:dead");
+      else if (mode === "computer") endMatch("You lose: you topped out.");
+      else setStatus("Game over. Restart to try again.");
+    }
+  });
+  let last = 0;
+  const loop = (time = 0) => {
+    const delta = time - last;
+    last = time;
+    playerGame?.update(delta);
+    if (mode === "computer") opponentGame?.update(delta);
+    animationId = requestAnimationFrame(loop);
+  };
+  loop();
+}
+
+function stopLoops() {
+  cancelAnimationFrame(animationId);
+  clearInterval(computerTimer);
+  computerTimer = null;
+}
+
+function endMatch(message) {
+  setStatus(message);
+  if (playerGame) playerGame.paused = true;
+  if (opponentGame) opponentGame.paused = true;
+  stopLoops();
+}
+
+document.addEventListener("keydown", (event) => {
+  if (!playerGame || playerGame.dead || playerGame.paused) return;
+  const actions = {
+    ArrowLeft: () => playerGame.move(-1),
+    ArrowRight: () => playerGame.move(1),
+    ArrowDown: () => playerGame.softDrop(),
+    ArrowUp: () => playerGame.rotate(),
+    Space: () => playerGame.hardDrop()
+  };
+  if (actions[event.code]) {
+    event.preventDefault();
+    actions[event.code]();
+  }
+});
+
+ids("authForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const data = await api("/api/login", { username: ids("username").value, password: ids("password").value });
+    token = data.token;
+    localStorage.setItem(tokenKey, token);
+    await refreshMe();
+    setStatus(`Logged in as ${data.user.username}.`);
+  } catch (error) { setStatus(error.message); }
+});
+
+ids("registerBtn").addEventListener("click", async () => {
+  try {
+    const data = await api("/api/register", { username: ids("username").value, password: ids("password").value });
+    token = data.token;
+    localStorage.setItem(tokenKey, token);
+    await refreshMe();
+    setStatus(`Registered ${data.user.username}.`);
+  } catch (error) { setStatus(error.message); }
+});
+
+ids("logoutBtn").addEventListener("click", logout);
+ids("singleBtn").addEventListener("click", startSingle);
+ids("multiBtn").addEventListener("click", () => show("multiMenu"));
+ids("vsHumanBtn").addEventListener("click", () => { show("humanMenu"); refreshMe(); connectSocket(); });
+ids("vsComputerBtn").addEventListener("click", startComputer);
+document.querySelectorAll(".backBtn").forEach((btn) => btn.addEventListener("click", () => show("menu")));
+ids("homeBtn").addEventListener("click", () => { stopLoops(); show("menu"); });
+ids("restartBtn").addEventListener("click", () => mode === "computer" ? startComputer() : mode === "single" ? startSingle() : setStatus("Human matches restart by starting a new challenge or quick play."));
+ids("quickBtn").addEventListener("click", async () => {
+  if (await connectSocket()) socket.emit("quick:join");
+});
+
+ids("friendForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/friends/request", { username: ids("friendName").value });
+    setStatus("Friend request sent.");
+    await refreshMe();
+  } catch (error) { setStatus(error.message); }
+});
+
+document.body.addEventListener("click", async (event) => {
+  const accept = event.target.dataset.accept;
+  const challenge = event.target.dataset.challenge;
+  const acceptChallenge = event.target.dataset.acceptChallenge;
+  try {
+    if (accept) {
+      await api("/api/friends/accept", { username: accept });
+      await refreshMe();
+      setStatus(`You are now friends with ${accept}.`);
+    }
+    if (challenge) {
+      if (await connectSocket()) socket.emit("challenge:send", { to: challenge });
+    }
+    if (acceptChallenge) {
+      if (await connectSocket()) socket.emit("challenge:accept", { id: acceptChallenge });
+    }
+  } catch (error) { setStatus(error.message); }
+});
+
+refreshMe();

@@ -1,0 +1,18 @@
+{
+  "name": "retro-tetris-arena",
+  "version": "1.0.0",
+  "description": "8-bit singleplayer and multiplayer Tetris with accounts, friends, challenges, quick play, and computer battles.",
+  "main": "server.js",
+  "scripts": {
+    "build": "node scripts/build-site.mjs",
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

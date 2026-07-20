@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Retro Tetris Arena</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>Retro Tetris Arena</h1>
+          <p id="status">Choose a mode. Arrow keys move, up rotates, space hard drops.</p>
+        </div>
+        <div class="account" id="accountPanel">
+          <form id="authForm" class="auth">
+            <input id="username" placeholder="username" autocomplete="username" />
+            <input id="password" type="password" placeholder="password" autocomplete="current-password" />
+            <button type="submit" data-action="login">Login</button>
+            <button type="button" id="registerBtn">Register</button>
+          </form>
+          <div id="signedIn" class="hidden userbox">
+            <span id="signedName"></span>
+            <button id="logoutBtn">Logout</button>
+          </div>
+        </div>
+      </header>
+
+      <section id="menu" class="menu">
+        <button id="singleBtn" class="big">Singleplayer</button>
+        <button id="multiBtn" class="big">Multiplayer</button>
+      </section>
+
+      <section id="multiMenu" class="menu hidden">
+        <button id="vsHumanBtn" class="big">Vs Human</button>
+        <button id="vsComputerBtn" class="big">Vs Computer</button>
+        <button class="backBtn">Back</button>
+      </section>
+
+      <section id="humanMenu" class="panel hidden">
+        <div class="split">
+          <div>
+            <h2>Quick Play</h2>
+            <button id="quickBtn" class="wide">Find Anyone</button>
+          </div>
+          <div>
+            <h2>Friends</h2>
+            <form id="friendForm" class="row">
+              <input id="friendName" placeholder="friend username" />
+              <button>Add</button>
+            </form>
+            <div id="incoming"></div>
+            <div id="friends"></div>
+          </div>
+        </div>
+        <button class="backBtn">Back</button>
+      </section>
+
+      <section id="arena" class="arena hidden">
+        <div class="hud">
+          <button id="homeBtn">Menu</button>
+          <button id="restartBtn">Restart</button>
+          <div id="matchLabel">Singleplayer</div>
+        </div>
+        <div class="boards">
+          <article class="board-card">
+            <h2>You</h2>
+            <canvas id="playerBoard" width="240" height="480"></canvas>
+            <div class="stats"><span>Score <b id="score">0</b></span><span>Lines <b id="lines">0</b></span></div>
+          </article>
+          <article class="board-card" id="opponentCard">
+            <h2 id="opponentName">Opponent</h2>
+            <canvas id="opponentBoard" width="240" height="480"></canvas>
+            <div class="stats"><span>Status <b id="opponentStatus">Ready</b></span></div>
+          </article>
+        </div>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
