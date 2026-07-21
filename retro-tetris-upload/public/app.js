@@ -176,8 +176,10 @@ class TetrisGame {
   addGarbage(rows = 1) {
     for (let i = 0; i < rows; i++) {
       this.board.shift();
-      const hole = Math.floor(Math.random() * COLS);
-      this.board.push(Array.from({ length: COLS }, (_, x) => (x === hole ? 0 : 8)));
+      const gapCount = 1 + Math.floor(Math.random() * 4);
+      const gaps = new Set();
+      while (gaps.size < gapCount) gaps.add(Math.floor(Math.random() * COLS));
+      this.board.push(Array.from({ length: COLS }, (_, x) => (gaps.has(x) ? 0 : 8)));
     }
     if (this.collide()) {
       this.dead = true;
