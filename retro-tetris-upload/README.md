@@ -59,5 +59,5 @@ GitHub Pages can host the browser game, but it cannot run the Node/Socket.IO ser
 
 - Left/Right: move
 - Down: soft drop
-- Up: rotate
-- Space: hard drop
+- Up or Space: rotate
+- Enter: hard drop

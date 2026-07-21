@@ -571,11 +571,13 @@ document.addEventListener("keydown", (event) => {
     ArrowRight: () => playerGame.move(1),
     ArrowDown: () => playerGame.softDrop(),
     ArrowUp: () => playerGame.rotate(),
-    Space: () => playerGame.hardDrop()
+    Space: () => playerGame.rotate(),
+    Enter: () => playerGame.hardDrop()
   };
-  if (actions[event.code]) {
+  const action = actions[event.code] || actions[event.key];
+  if (action) {
     event.preventDefault();
-    actions[event.code]();
+    action();
   }
 });
 
