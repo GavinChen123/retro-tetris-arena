@@ -34,7 +34,15 @@
 
       <section id="multiMenu" class="menu hidden">
         <button id="vsHumanBtn" class="big">Vs Human</button>
-        <button id="vsComputerBtn" class="big">Vs Computer</button>
+        <div class="computer-panel">
+          <h2>Vs Computer</h2>
+          <div class="difficulty" role="group" aria-label="Computer difficulty">
+            <button class="difficultyBtn selected" data-difficulty="easy">Easy</button>
+            <button class="difficultyBtn" data-difficulty="normal">Normal</button>
+            <button class="difficultyBtn" data-difficulty="hard">Hard</button>
+          </div>
+          <button id="vsComputerBtn" class="big">Start CPU Match</button>
+        </div>
         <button class="backBtn">Back</button>
       </section>
 

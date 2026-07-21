@@ -11,6 +11,29 @@ const PIECES = {
   J: [[6, 0, 0], [6, 6, 6]],
   L: [[0, 0, 7], [7, 7, 7]]
 };
+const AI_DIFFICULTIES = {
+  easy: {
+    label: "Easy",
+    stepMs: 430,
+    dropInterval: 620,
+    mistakeChance: 0.35,
+    weights: { lines: -1.2, height: 1.25, holes: 4.5, bumpiness: 0.75, wells: 0.2 }
+  },
+  normal: {
+    label: "Normal",
+    stepMs: 240,
+    dropInterval: 470,
+    mistakeChance: 0.12,
+    weights: { lines: -3.5, height: 1.0, holes: 7.0, bumpiness: 1.0, wells: -0.15 }
+  },
+  hard: {
+    label: "Hard",
+    stepMs: 115,
+    dropInterval: 330,
+    mistakeChance: 0.02,
+    weights: { lines: -6.0, height: 0.75, holes: 9.0, bumpiness: 1.15, wells: -0.35 }
+  }
+};
 const ids = (id) => document.getElementById(id);
 const tokenKey = "retroTetrisToken";
 const localUsersKey = "retroTetrisLocalUsers";
@@ -25,6 +48,15 @@ let opponentGame = null;
 let animationId = null;
 let computerTimer = null;
 let socketScriptPromise = null;
+let selectedDifficulty = "easy";
+
+function rotateMatrix(matrix) {
+  return matrix[0].map((_, i) => matrix.map((row) => row[i]).reverse());
+}
+
+function matrixEquals(a, b) {
+  return a.length === b.length && a.every((row, y) => row.length === b[y].length && row.every((value, x) => value === b[y][x]));
+}
 
 class TetrisGame {
   constructor(canvas, options = {}) {
@@ -38,19 +70,25 @@ class TetrisGame {
     this.board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
     this.score = 0;
     this.lines = 0;
+    this.spawnCounter = 0;
     this.dropCounter = 0;
-    this.dropInterval = this.options.ai ? 520 : 720;
+    this.dropInterval = this.options.ai ? this.aiConfig().dropInterval : 720;
     this.dead = false;
     this.paused = false;
+    this.aiPlan = null;
     this.piece = this.newPiece();
     this.draw();
+  }
+
+  aiConfig() {
+    return AI_DIFFICULTIES[this.options.difficulty || "easy"] || AI_DIFFICULTIES.easy;
   }
 
   newPiece() {
     const keys = Object.keys(PIECES);
     const type = keys[Math.floor(Math.random() * keys.length)];
     const matrix = PIECES[type].map((row) => [...row]);
-    return { matrix, x: Math.floor(COLS / 2) - Math.ceil(matrix[0].length / 2), y: 0 };
+    return { matrix, x: Math.floor(COLS / 2) - Math.ceil(matrix[0].length / 2), y: 0, id: ++this.spawnCounter };
   }
 
   collide(piece = this.piece) {
@@ -69,7 +107,7 @@ class TetrisGame {
   }
 
   rotate() {
-    const matrix = this.piece.matrix[0].map((_, i) => this.piece.matrix.map((row) => row[i]).reverse());
+    const matrix = rotateMatrix(this.piece.matrix);
     const old = this.piece.matrix;
     this.piece.matrix = matrix;
     let offset = 1;
@@ -108,7 +146,8 @@ class TetrisGame {
   lock() {
     this.merge();
     const cleared = this.clearLines();
-    if (cleared >= 2 && this.options.onAttack) this.options.onAttack(1);
+    if (cleared >= 2 && this.options.onAttack) this.options.onAttack(cleared - 1);
+    this.aiPlan = null;
     this.piece = this.newPiece();
     if (this.collide()) {
       this.dead = true;
@@ -158,15 +197,30 @@ class TetrisGame {
 
   aiStep() {
     if (this.dead) return;
-    const target = this.bestMove();
+    const target = this.currentAiPlan();
+    if (!target) {
+      this.softDrop();
+      return;
+    }
+    if (!matrixEquals(this.piece.matrix, target.matrix)) {
+      this.rotate();
+      return;
+    }
     if (this.piece.x < target.x) this.move(1);
     else if (this.piece.x > target.x) this.move(-1);
-    else if (target.rotations-- > 0) this.rotate();
-    else this.hardDrop();
+    else this.softDrop();
+  }
+
+  currentAiPlan() {
+    if (!this.aiPlan || this.aiPlan.pieceId !== this.piece.id) {
+      this.aiPlan = { pieceId: this.piece.id, ...this.bestMove() };
+    }
+    return this.aiPlan;
   }
 
   bestMove() {
-    let best = { score: Infinity, x: this.piece.x, rotations: 0 };
+    const difficulty = this.aiConfig();
+    const candidates = [];
     let testMatrix = this.piece.matrix.map((r) => [...r]);
     for (let r = 0; r < 4; r++) {
       for (let x = -2; x < COLS; x++) {
@@ -174,19 +228,34 @@ class TetrisGame {
         while (!this.collide(testPiece)) testPiece.y++;
         testPiece.y--;
         if (testPiece.y < 0) continue;
-        const score = this.scoreLanding(testPiece);
-        if (score < best.score) best = { score, x, rotations: r };
+        const score = this.scoreLanding(testPiece, difficulty.weights);
+        candidates.push({ score, x, matrix: testMatrix.map((row) => [...row]) });
       }
-      testMatrix = testMatrix[0].map((_, i) => testMatrix.map((row) => row[i]).reverse());
+      testMatrix = rotateMatrix(testMatrix);
     }
-    return best;
+    candidates.sort((a, b) => a.score - b.score);
+    if (!candidates.length) return null;
+    if (Math.random() < difficulty.mistakeChance) {
+      const sloppyPool = candidates.slice(1, Math.min(candidates.length, difficulty.label === "Easy" ? 8 : 4));
+      return sloppyPool[Math.floor(Math.random() * sloppyPool.length)] || candidates[0];
+    }
+    return candidates[0];
   }
 
-  scoreLanding(piece) {
+  scoreLanding(piece, weights) {
     const clone = this.board.map((r) => [...r]);
     piece.matrix.forEach((row, y) => row.forEach((value, x) => {
       if (value && piece.y + y >= 0 && piece.x + x >= 0 && piece.x + x < COLS) clone[piece.y + y][piece.x + x] = value;
     }));
+    let cleared = 0;
+    for (let y = ROWS - 1; y >= 0; y--) {
+      if (clone[y].every(Boolean)) {
+        clone.splice(y, 1);
+        clone.unshift(Array(COLS).fill(0));
+        cleared++;
+        y++;
+      }
+    }
     const heights = Array(COLS).fill(0);
     let holes = 0;
     for (let x = 0; x < COLS; x++) {
@@ -198,7 +267,14 @@ class TetrisGame {
         } else if (seen) holes++;
       }
     }
-    return Math.max(...heights) * 2 + holes * 7 + heights.reduce((s, h, i) => s + (i ? Math.abs(h - heights[i - 1]) : 0), 0);
+    const aggregateHeight = heights.reduce((sum, height) => sum + height, 0);
+    const bumpiness = heights.reduce((sum, height, i) => sum + (i ? Math.abs(height - heights[i - 1]) : 0), 0);
+    const wells = heights.reduce((sum, height, i) => {
+      const left = i === 0 ? ROWS : heights[i - 1];
+      const right = i === COLS - 1 ? ROWS : heights[i + 1];
+      return sum + Math.max(0, Math.min(left, right) - height);
+    }, 0);
+    return cleared * weights.lines + aggregateHeight * weights.height + holes * weights.holes + bumpiness * weights.bumpiness + wells * weights.wells;
   }
 
   changed() {
@@ -416,16 +492,18 @@ function startSingle() {
 
 function startComputer() {
   mode = "computer";
+  const difficulty = AI_DIFFICULTIES[selectedDifficulty];
   ids("opponentCard").classList.remove("hidden");
-  ids("opponentName").textContent = "CPU";
-  ids("matchLabel").textContent = "Vs Computer";
-  startArena("Clear 2+ rows to add garbage to the CPU.");
+  ids("opponentName").textContent = `CPU ${difficulty.label}`;
+  ids("matchLabel").textContent = `Vs Computer: ${difficulty.label}`;
+  startArena("Clearing N rows sends N-1 garbage rows.");
   opponentGame = new TetrisGame(ids("opponentBoard"), {
     ai: true,
+    difficulty: selectedDifficulty,
     onAttack: (rows) => playerGame.addGarbage(rows),
     onDead: () => endMatch("You win: CPU topped out.")
   });
-  computerTimer = setInterval(() => opponentGame.aiStep(), 260);
+  computerTimer = setInterval(() => opponentGame.aiStep(), difficulty.stepMs);
 }
 
 function startHumanMatch(opponent) {
@@ -433,7 +511,7 @@ function startHumanMatch(opponent) {
   ids("opponentCard").classList.remove("hidden");
   ids("opponentName").textContent = opponent;
   ids("matchLabel").textContent = `Vs ${opponent}`;
-  startArena("Fight started. Clear 2+ rows to send one garbage row.");
+  startArena("Fight started. Clearing N rows sends N-1 garbage rows.");
 }
 
 function startArena(message) {
@@ -525,6 +603,12 @@ ids("singleBtn").addEventListener("click", startSingle);
 ids("multiBtn").addEventListener("click", () => show("multiMenu"));
 ids("vsHumanBtn").addEventListener("click", () => { show("humanMenu"); refreshMe(); connectSocket(); });
 ids("vsComputerBtn").addEventListener("click", startComputer);
+document.querySelectorAll(".difficultyBtn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    selectedDifficulty = btn.dataset.difficulty;
+    document.querySelectorAll(".difficultyBtn").forEach((item) => item.classList.toggle("selected", item === btn));
+  });
+});
 document.querySelectorAll(".backBtn").forEach((btn) => btn.addEventListener("click", () => show("menu")));
 ids("homeBtn").addEventListener("click", () => { stopLoops(); show("menu"); });
 ids("restartBtn").addEventListener("click", () => mode === "computer" ? startComputer() : mode === "single" ? startSingle() : setStatus("Human matches restart by starting a new challenge or quick play."));
