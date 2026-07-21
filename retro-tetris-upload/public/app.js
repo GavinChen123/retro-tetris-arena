@@ -50,7 +50,7 @@ let computerTimer = null;
 let socketScriptPromise = null;
 let selectedDifficulty = "easy";
 let lastDownTapAt = 0;
-const HARD_DROP_TAP_MS = 260;
+const HARD_DROP_TAP_MS = 340;
 
 function rotateMatrix(matrix) {
   return matrix[0].map((_, i) => matrix.map((row) => row[i]).reverse());
@@ -586,7 +586,8 @@ document.addEventListener("keydown", (event) => {
     ArrowRight: () => playerGame.move(1),
     ArrowUp: () => playerGame.rotate(),
     Space: () => playerGame.rotate(),
-    Enter: () => playerGame.hardDrop()
+    " ": () => playerGame.rotate(),
+    ShiftRight: () => playerGame.hardDrop()
   };
   const action = actions[event.code] || actions[event.key];
   if (action) {
