@@ -49,6 +49,8 @@ let animationId = null;
 let computerTimer = null;
 let socketScriptPromise = null;
 let selectedDifficulty = "easy";
+let lastDownTapAt = 0;
+const HARD_DROP_TAP_MS = 260;
 
 function rotateMatrix(matrix) {
   return matrix[0].map((_, i) => matrix.map((row) => row[i]).reverse());
@@ -566,10 +568,22 @@ function endMatch(message) {
 
 document.addEventListener("keydown", (event) => {
   if (!playerGame || playerGame.dead || playerGame.paused) return;
+  if (event.code === "ArrowDown") {
+    event.preventDefault();
+    const now = performance.now();
+    if (!event.repeat && now - lastDownTapAt <= HARD_DROP_TAP_MS) {
+      lastDownTapAt = 0;
+      playerGame.hardDrop();
+    } else {
+      if (!event.repeat) lastDownTapAt = now;
+      playerGame.softDrop();
+      if (!playerGame.dead) playerGame.softDrop();
+    }
+    return;
+  }
   const actions = {
     ArrowLeft: () => playerGame.move(-1),
     ArrowRight: () => playerGame.move(1),
-    ArrowDown: () => playerGame.softDrop(),
     ArrowUp: () => playerGame.rotate(),
     Space: () => playerGame.rotate(),
     Enter: () => playerGame.hardDrop()
