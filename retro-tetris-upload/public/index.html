@@ -74,12 +74,24 @@
         <div class="boards">
           <article class="board-card">
             <h2>You</h2>
-            <canvas id="playerBoard" width="240" height="480"></canvas>
+            <div class="play-area">
+              <canvas class="board-canvas" id="playerBoard" width="240" height="576"></canvas>
+              <aside class="next-box">
+                <span>Next</span>
+                <canvas class="next-canvas" id="playerNext" width="112" height="96"></canvas>
+              </aside>
+            </div>
             <div class="stats"><span>Score <b id="score">0</b></span><span>Lines <b id="lines">0</b></span></div>
           </article>
           <article class="board-card" id="opponentCard">
             <h2 id="opponentName">Opponent</h2>
-            <canvas id="opponentBoard" width="240" height="480"></canvas>
+            <div class="play-area">
+              <canvas class="board-canvas" id="opponentBoard" width="240" height="576"></canvas>
+              <aside class="next-box">
+                <span>Next</span>
+                <canvas class="next-canvas" id="opponentNext" width="112" height="96"></canvas>
+              </aside>
+            </div>
             <div class="stats"><span>Status <b id="opponentStatus">Ready</b></span></div>
           </article>
         </div>

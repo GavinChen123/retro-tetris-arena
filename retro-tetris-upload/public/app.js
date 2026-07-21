@@ -1,6 +1,7 @@
 const COLS = 10;
-const ROWS = 20;
+const ROWS = 24;
 const BLOCK = 24;
+const PREVIEW_BLOCK = 20;
 const COLORS = ["#000000", "#5b6ee1", "#6abe30", "#d9a441", "#ac3232", "#5fcde4", "#d95763", "#8f563b", "#f8f8d8"];
 const PIECES = {
   I: [[1, 1, 1, 1]],
@@ -64,6 +65,8 @@ class TetrisGame {
   constructor(canvas, options = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
+    this.nextCanvas = options.nextCanvas || null;
+    this.nextCtx = this.nextCanvas?.getContext("2d") || null;
     this.options = options;
     this.reset();
   }
@@ -78,7 +81,8 @@ class TetrisGame {
     this.dead = false;
     this.paused = false;
     this.aiPlan = null;
-    this.piece = this.newPiece();
+    this.piece = this.randomPiece();
+    this.nextPiece = this.randomPiece();
     this.draw();
   }
 
@@ -86,11 +90,22 @@ class TetrisGame {
     return AI_DIFFICULTIES[this.options.difficulty || "easy"] || AI_DIFFICULTIES.easy;
   }
 
-  newPiece() {
+  randomPiece() {
     const keys = Object.keys(PIECES);
     const type = keys[Math.floor(Math.random() * keys.length)];
     const matrix = PIECES[type].map((row) => [...row]);
     return { matrix, x: Math.floor(COLS / 2) - Math.ceil(matrix[0].length / 2), y: 0, id: ++this.spawnCounter };
+  }
+
+  takeNextPiece() {
+    this.piece = {
+      ...this.nextPiece,
+      matrix: this.nextPiece.matrix.map((row) => [...row]),
+      x: Math.floor(COLS / 2) - Math.ceil(this.nextPiece.matrix[0].length / 2),
+      y: 0,
+      id: ++this.spawnCounter
+    };
+    this.nextPiece = this.randomPiece();
   }
 
   collide(piece = this.piece) {
@@ -150,7 +165,7 @@ class TetrisGame {
     const cleared = this.clearLines();
     if (cleared >= 2 && this.options.onAttack) this.options.onAttack(cleared - 1);
     this.aiPlan = null;
-    this.piece = this.newPiece();
+    this.takeNextPiece();
     if (this.collide()) {
       this.dead = true;
       this.options.onDead?.();
@@ -287,12 +302,13 @@ class TetrisGame {
   }
 
   snapshot() {
-    return { board: this.board, piece: this.piece, score: this.score, lines: this.lines, dead: this.dead };
+    return { board: this.board, piece: this.piece, nextPiece: this.nextPiece, score: this.score, lines: this.lines, dead: this.dead };
   }
 
   loadSnapshot(state) {
     this.board = state.board;
     this.piece = state.piece;
+    this.nextPiece = state.nextPiece || null;
     this.score = state.score || 0;
     this.lines = state.lines || 0;
     this.dead = !!state.dead;
@@ -304,6 +320,7 @@ class TetrisGame {
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     this.drawMatrix(this.board, 0, 0);
     if (this.piece && !this.dead) this.drawMatrix(this.piece.matrix, this.piece.x, this.piece.y);
+    this.drawNext();
     if (this.dead) {
       this.ctx.fillStyle = "rgba(0,0,0,.72)";
       this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -326,6 +343,27 @@ class TetrisGame {
       this.ctx.strokeRect(px + 1, py + 1, BLOCK - 2, BLOCK - 2);
       this.ctx.fillStyle = "rgba(0,0,0,.25)";
       this.ctx.fillRect(px + BLOCK - 6, py + 4, 3, BLOCK - 8);
+    }));
+  }
+
+  drawNext() {
+    if (!this.nextCtx || !this.nextCanvas || !this.nextPiece) return;
+    this.nextCtx.fillStyle = "#0b0b12";
+    this.nextCtx.fillRect(0, 0, this.nextCanvas.width, this.nextCanvas.height);
+    const matrix = this.nextPiece.matrix;
+    const pieceWidth = matrix[0].length * PREVIEW_BLOCK;
+    const pieceHeight = matrix.length * PREVIEW_BLOCK;
+    const ox = Math.floor((this.nextCanvas.width - pieceWidth) / 2);
+    const oy = Math.floor((this.nextCanvas.height - pieceHeight) / 2);
+    matrix.forEach((row, y) => row.forEach((value, x) => {
+      if (!value) return;
+      const px = ox + x * PREVIEW_BLOCK;
+      const py = oy + y * PREVIEW_BLOCK;
+      this.nextCtx.fillStyle = COLORS[value];
+      this.nextCtx.fillRect(px, py, PREVIEW_BLOCK, PREVIEW_BLOCK);
+      this.nextCtx.strokeStyle = "#f8f8d8";
+      this.nextCtx.lineWidth = 2;
+      this.nextCtx.strokeRect(px + 1, py + 1, PREVIEW_BLOCK - 2, PREVIEW_BLOCK - 2);
     }));
   }
 }
@@ -460,7 +498,7 @@ async function connectSocket() {
   socket.on("quick:waiting", () => setStatus("Waiting for another quick play challenger..."));
   socket.on("match:start", ({ opponent }) => startHumanMatch(opponent));
   socket.on("opponent:state", (state) => {
-    if (!opponentGame) opponentGame = new TetrisGame(ids("opponentBoard"));
+    if (!opponentGame) opponentGame = new TetrisGame(ids("opponentBoard"), { nextCanvas: ids("opponentNext") });
     opponentGame.loadSnapshot(state);
     ids("opponentStatus").textContent = state.dead ? "Out" : "Playing";
   });
@@ -504,6 +542,7 @@ function startComputer() {
   opponentGame = new TetrisGame(ids("opponentBoard"), {
     ai: true,
     difficulty: selectedDifficulty,
+    nextCanvas: ids("opponentNext"),
     onAttack: (rows) => playerGame.addGarbage(rows),
     onDead: () => endMatch("You win: CPU topped out.")
   });
@@ -527,6 +566,7 @@ function startArena(message) {
   ids("opponentStatus").textContent = "Ready";
   opponentGame = mode === "single" ? null : opponentGame;
   playerGame = new TetrisGame(ids("playerBoard"), {
+    nextCanvas: ids("playerNext"),
     onAttack: (rows) => {
       if (mode === "human") socket?.emit("game:attack", { rows });
       if (mode === "computer") opponentGame?.addGarbage(rows);
