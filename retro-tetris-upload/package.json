@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "build": "node scripts/build-site.mjs",
+    "test": "node scripts/test-game-logic.mjs",
     "start": "node server.js",
     "dev": "node server.js"
   },

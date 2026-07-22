@@ -191,14 +191,17 @@ class TetrisGame {
   }
 
   addGarbage(rows = 1) {
+    let toppedOut = false;
     for (let i = 0; i < rows; i++) {
-      this.board.shift();
+      const pushedOut = this.board.shift();
+      if (pushedOut.some(Boolean)) toppedOut = true;
       const gapCount = 1 + Math.floor(Math.random() * 4);
       const gaps = new Set();
       while (gaps.size < gapCount) gaps.add(Math.floor(Math.random() * COLS));
       this.board.push(Array.from({ length: COLS }, (_, x) => (gaps.has(x) ? 0 : 8)));
     }
-    if (this.collide()) {
+    while (this.collide() && this.piece.y > -this.piece.matrix.length) this.piece.y--;
+    if (toppedOut || this.collide()) {
       this.dead = true;
       this.options.onDead?.();
     }
