@@ -25,6 +25,12 @@ The app is now installable as a Mac web app.
 
 The installed app opens in its own window and caches the game shell for faster loading. Realtime multiplayer still needs the Node server to be online.
 
+## Build A Mac App With Xcode
+
+There is also a native macOS wrapper in `macos/RetroTetrisArenaMac`.
+
+Open that folder in Xcode, choose the `RetroTetrisArena` scheme, and press Run. The app uses SwiftUI plus `WKWebView` to load the hosted game in a native Mac window. To use realtime multiplayer, set `defaultGameURL` in `Sources/RetroTetrisArenaApp.swift` to your Render URL.
+
 ## Deploy Full Multiplayer To Koyeb
 
 Koyeb can run the Node server needed for accounts, quick play, friend challenges, and Socket.IO multiplayer.
