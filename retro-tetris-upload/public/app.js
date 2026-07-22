@@ -52,6 +52,8 @@ let socketScriptPromise = null;
 let selectedDifficulty = "easy";
 let lastDownTapAt = 0;
 const HARD_DROP_TAP_MS = 340;
+const URANIUM_USERNAME = "ieaturanium";
+const URANIUM_GARBAGE_DODGE_CHANCE = 0.3;
 
 function rotateMatrix(matrix) {
   return matrix[0].map((_, i) => matrix.map((row) => row[i]).reverse());
@@ -190,9 +192,11 @@ class TetrisGame {
     return cleared;
   }
 
-  addGarbage(rows = 1) {
+  addGarbage(rows = 1, options = {}) {
     let toppedOut = false;
+    const dodgeChance = Math.max(0, Math.min(1, Number(options.dodgeChance) || 0));
     for (let i = 0; i < rows; i++) {
+      if (dodgeChance && Math.random() < dodgeChance) continue;
       const pushedOut = this.board.shift();
       if (pushedOut.some(Boolean)) toppedOut = true;
       const gapCount = 1 + Math.floor(Math.random() * 4);
@@ -371,6 +375,18 @@ class TetrisGame {
   }
 }
 
+function currentUsername() {
+  return (me?.username || "").toLowerCase();
+}
+
+function incomingGarbageDodgeChance() {
+  return currentUsername() === URANIUM_USERNAME ? URANIUM_GARBAGE_DODGE_CHANCE : 0;
+}
+
+function addIncomingGarbage(game, rows) {
+  game?.addGarbage(rows, { dodgeChance: incomingGarbageDodgeChance() });
+}
+
 function setStatus(message) { ids("status").textContent = message; }
 function show(id) {
   ["menu", "multiMenu", "humanMenu", "arena"].forEach((name) => ids(name).classList.toggle("hidden", name !== id));
@@ -505,7 +521,7 @@ async function connectSocket() {
     opponentGame.loadSnapshot(state);
     ids("opponentStatus").textContent = state.dead ? "Out" : "Playing";
   });
-  socket.on("opponent:attack", ({ rows }) => playerGame?.addGarbage(rows));
+  socket.on("opponent:attack", ({ rows }) => addIncomingGarbage(playerGame, rows));
   socket.on("match:win", ({ reason }) => endMatch(`You win: ${reason}.`));
   socket.on("match:lose", ({ reason }) => endMatch(`You lose: ${reason}.`));
   socket.on("challenge:incoming", (challenge) => {
@@ -546,7 +562,7 @@ function startComputer() {
     ai: true,
     difficulty: selectedDifficulty,
     nextCanvas: ids("opponentNext"),
-    onAttack: (rows) => playerGame.addGarbage(rows),
+    onAttack: (rows) => addIncomingGarbage(playerGame, rows),
     onDead: () => endMatch("You win: CPU topped out.")
   });
   computerTimer = setInterval(() => opponentGame.aiStep(), difficulty.stepMs);

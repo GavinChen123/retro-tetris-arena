@@ -103,4 +103,16 @@ function makeGame() {
   }
 }
 
+{
+  const game = makeGame();
+  game.board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+  game.board[ROWS - 1][0] = 1;
+  const before = JSON.stringify(game.board);
+
+  game.addGarbage(4, { dodgeChance: 1 });
+
+  assert.equal(game.dead, false, "dodged garbage should not top out the player");
+  assert.equal(JSON.stringify(game.board), before, "dodged garbage rows should not raise the board");
+}
+
 console.log("Game logic tests passed");
