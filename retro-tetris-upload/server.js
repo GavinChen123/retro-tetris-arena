@@ -162,8 +162,24 @@ function makeMatch(playerA, playerB, mode = "human") {
   playerB.socket.join(id);
   playerA.socket.data.matchId = id;
   playerB.socket.data.matchId = id;
+  playerA.socket.data.lastOpponent = playerB.username;
+  playerB.socket.data.lastOpponent = playerA.username;
   playerA.socket.emit("match:start", { matchId: id, side: 0, opponent: playerB.username });
   playerB.socket.emit("match:start", { matchId: id, side: 1, opponent: playerA.username });
+}
+
+function createChallenge(from, to, options = {}) {
+  const challenge = {
+    id: crypto.randomBytes(8).toString("hex"),
+    from: cleanName(from),
+    to: cleanName(to),
+    rematch: !!options.rematch,
+    createdAt: Date.now()
+  };
+  db.challenges.push(challenge);
+  saveDb();
+  emitUser(challenge.to, "challenge:incoming", challenge);
+  return challenge;
 }
 
 io.use((socket, next) => {
@@ -198,11 +214,18 @@ io.on("connection", (socket) => {
     const target = cleanName(to);
     if (!socket.data.user) return socket.emit("notice", { type: "error", message: "Sign in to challenge friends." });
     if (!areFriends(username, target)) return socket.emit("notice", { type: "error", message: "You can only challenge friends." });
-    const challenge = { id: crypto.randomBytes(8).toString("hex"), from: username, to: target, createdAt: Date.now() };
-    db.challenges.push(challenge);
-    saveDb();
-    emitUser(target, "challenge:incoming", challenge);
+    createChallenge(username, target);
     socket.emit("notice", { type: "ok", message: `Challenge sent to ${target}.` });
+  });
+
+  socket.on("rematch:request", ({ to } = {}) => {
+    const target = cleanName(to || socket.data.lastOpponent);
+    if (!target || target === username) return socket.emit("notice", { type: "error", message: "No opponent to rematch." });
+    const targetIds = socketsByUser.get(target);
+    const targetOnline = targetIds && [...targetIds].some((sid) => io.sockets.sockets.get(sid));
+    if (!targetOnline) return socket.emit("notice", { type: "error", message: `${target} is offline.` });
+    createChallenge(username, target, { rematch: true });
+    socket.emit("notice", { type: "ok", message: `Rematch request sent to ${target}.` });
   });
 
   socket.on("challenge:accept", ({ id }) => {

@@ -51,6 +51,7 @@ let computerTimer = null;
 let socketScriptPromise = null;
 let selectedDifficulty = "easy";
 let lastDownTapAt = 0;
+let currentHumanOpponent = null;
 const HARD_DROP_TAP_MS = 340;
 const URANIUM_USERNAME = "ieaturanium";
 const URANIUM_GARBAGE_DODGE_CHANCE = 0.3;
@@ -525,8 +526,9 @@ async function connectSocket() {
   socket.on("match:win", ({ reason }) => endMatch(`You win: ${reason}.`));
   socket.on("match:lose", ({ reason }) => endMatch(`You lose: ${reason}.`));
   socket.on("challenge:incoming", (challenge) => {
-    setStatus(`${challenge.from} challenged you.`);
-    ids("incoming").insertAdjacentHTML("afterbegin", `<div class="friend-line"><span>${challenge.from} challenged you</span><button data-accept-challenge="${challenge.id}">Fight</button></div>`);
+    const label = challenge.rematch ? `${challenge.from} wants a rematch` : `${challenge.from} challenged you`;
+    setStatus(`${label}.`);
+    ids("incoming").insertAdjacentHTML("afterbegin", `<div class="friend-line"><span>${label}</span><button data-accept-challenge="${challenge.id}">Fight</button></div>`);
   });
   socket.on("notice", ({ message }) => setStatus(message));
   return true;
@@ -546,6 +548,7 @@ function loadSocketScript() {
 
 function startSingle() {
   mode = "single";
+  currentHumanOpponent = null;
   ids("opponentCard").classList.add("hidden");
   ids("matchLabel").textContent = "Singleplayer";
   startArena("Singleplayer ready.");
@@ -553,6 +556,7 @@ function startSingle() {
 
 function startComputer() {
   mode = "computer";
+  currentHumanOpponent = null;
   const difficulty = AI_DIFFICULTIES[selectedDifficulty];
   ids("opponentCard").classList.remove("hidden");
   ids("opponentName").textContent = `CPU ${difficulty.label}`;
@@ -570,10 +574,19 @@ function startComputer() {
 
 function startHumanMatch(opponent) {
   mode = "human";
+  currentHumanOpponent = opponent;
   ids("opponentCard").classList.remove("hidden");
   ids("opponentName").textContent = opponent;
   ids("matchLabel").textContent = `Vs ${opponent}`;
   startArena("Fight started. Clearing N rows sends N-1 garbage rows.");
+}
+
+async function requestHumanRematch() {
+  if (!currentHumanOpponent) {
+    setStatus("No opponent to rematch yet.");
+    return;
+  }
+  if (await connectSocket()) socket.emit("rematch:request", { to: currentHumanOpponent });
 }
 
 function startArena(message) {
@@ -689,7 +702,7 @@ document.querySelectorAll(".difficultyBtn").forEach((btn) => {
 });
 document.querySelectorAll(".backBtn").forEach((btn) => btn.addEventListener("click", () => show("menu")));
 ids("homeBtn").addEventListener("click", () => { stopLoops(); show("menu"); });
-ids("restartBtn").addEventListener("click", () => mode === "computer" ? startComputer() : mode === "single" ? startSingle() : setStatus("Human matches restart by starting a new challenge or quick play."));
+ids("restartBtn").addEventListener("click", () => mode === "computer" ? startComputer() : mode === "single" ? startSingle() : requestHumanRematch());
 ids("quickBtn").addEventListener("click", async () => {
   if (await connectSocket()) socket.emit("quick:join");
 });
