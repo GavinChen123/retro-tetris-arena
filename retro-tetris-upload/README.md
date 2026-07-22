@@ -29,7 +29,7 @@ The installed app opens in its own window and caches the game shell for faster l
 
 There is also a native macOS wrapper in `macos/RetroTetrisArenaMac`.
 
-Open that folder in Xcode, choose the `RetroTetrisArena` scheme, and press Run. The app uses SwiftUI plus `WKWebView` to load the hosted game in a native Mac window. To use realtime multiplayer, set `defaultGameURL` in `Sources/RetroTetrisArenaApp.swift` to your Render URL.
+Open that folder in Xcode, choose the `RetroTetrisArena` scheme, and press Run. The app uses SwiftUI plus `WKWebView` to load `https://retro-tetris-arena.onrender.com/` in a native Mac window so realtime multiplayer works.
 
 ## Deploy Full Multiplayer To Koyeb
 

@@ -1,7 +1,7 @@
 import SwiftUI
 import WebKit
 
-private let defaultGameURL = "https://gavinchen123.github.io/retro-tetris-arena/"
+private let defaultGameURL = "https://retro-tetris-arena.onrender.com/"
 
 @main
 struct RetroTetrisArenaApp: App {

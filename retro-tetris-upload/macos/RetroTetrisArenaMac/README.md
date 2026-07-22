@@ -10,14 +10,12 @@ This is a small native macOS wrapper for the browser game. It opens the hosted g
 4. Choose the `RetroTetrisArena` scheme.
 5. Press Run.
 
-## Change The Game URL
+## Game URL
 
-The default URL is set in `Sources/RetroTetrisArenaApp.swift`.
-
-For full realtime multiplayer, set `defaultGameURL` to your Render URL, for example:
+The default URL is set in `Sources/RetroTetrisArenaApp.swift`:
 
 ```swift
-private let defaultGameURL = "https://your-render-app.onrender.com"
+private let defaultGameURL = "https://retro-tetris-arena.onrender.com/"
 ```
 
-You can also override it while running from Xcode by setting the environment variable `RETRO_TETRIS_URL` in the scheme.
+That Render app runs the Node server needed for full realtime multiplayer. You can still override it while running from Xcode by setting the environment variable `RETRO_TETRIS_URL` in the scheme.
