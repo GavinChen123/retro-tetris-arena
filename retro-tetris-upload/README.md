@@ -16,6 +16,15 @@ npm start
 
 Open `http://localhost:3000`.
 
+## Install On Mac
+
+The app is now installable as a Mac web app.
+
+- Safari: open the hosted game, then choose `File > Add to Dock`.
+- Chrome: open the hosted game, click the install icon in the address bar or choose `More Tools > Create Shortcut`, then enable `Open as window`.
+
+The installed app opens in its own window and caches the game shell for faster loading. Realtime multiplayer still needs the Node server to be online.
+
 ## Deploy Full Multiplayer To Koyeb
 
 Koyeb can run the Node server needed for accounts, quick play, friend challenges, and Socket.IO multiplayer.

@@ -5,10 +5,13 @@ const root = resolve(import.meta.dirname, "..");
 const dist = resolve(root, "dist");
 const publicDir = resolve(root, "public");
 
-const [html, css, js, hosting] = await Promise.all([
+const [html, css, js, manifest, icon, sw, hosting] = await Promise.all([
   readFile(resolve(publicDir, "index.html"), "utf8"),
   readFile(resolve(publicDir, "styles.css"), "utf8"),
   readFile(resolve(publicDir, "app.js"), "utf8"),
+  readFile(resolve(publicDir, "manifest.webmanifest"), "utf8"),
+  readFile(resolve(publicDir, "icon.svg"), "utf8"),
+  readFile(resolve(publicDir, "sw.js"), "utf8"),
   readFile(resolve(root, ".openai", "hosting.json"), "utf8")
 ]);
 
@@ -16,7 +19,10 @@ const routes = {
   "/": { body: html, type: "text/html; charset=utf-8" },
   "/index.html": { body: html, type: "text/html; charset=utf-8" },
   "/styles.css": { body: css, type: "text/css; charset=utf-8" },
-  "/app.js": { body: js, type: "application/javascript; charset=utf-8" }
+  "/app.js": { body: js, type: "application/javascript; charset=utf-8" },
+  "/manifest.webmanifest": { body: manifest, type: "application/manifest+json; charset=utf-8" },
+  "/icon.svg": { body: icon, type: "image/svg+xml; charset=utf-8" },
+  "/sw.js": { body: sw, type: "application/javascript; charset=utf-8" }
 };
 
 const worker = `const routes = ${JSON.stringify(routes)};\n\nexport default {\n  async fetch(request) {\n    const url = new URL(request.url);\n    const asset = routes[url.pathname] || routes[\"/\"];\n    return new Response(asset.body, {\n      headers: {\n        \"content-type\": asset.type,\n        \"cache-control\": asset.type.startsWith(\"text/html\") ? \"no-cache\" : \"public, max-age=31536000, immutable\"\n      }\n    });\n  }\n};\n`;

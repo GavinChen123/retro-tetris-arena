@@ -1,0 +1,21 @@
+{
+  "name": "Retro Tetris Arena",
+  "short_name": "Tetris Arena",
+  "description": "An old 8-bit Tetris arena with singleplayer, CPU battles, and realtime human matches.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "browser"],
+  "background_color": "#111018",
+  "theme_color": "#222034",
+  "orientation": "portrait-primary",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

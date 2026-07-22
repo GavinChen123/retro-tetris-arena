@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title>Retro Tetris Arena</title>
+  <rect width="512" height="512" fill="#111018"/>
+  <path d="M0 0h512v512H0z" fill="#111018"/>
+  <path d="M32 32h448v448H32z" fill="#222034"/>
+  <path d="M56 56h400v400H56z" fill="#0b0b12"/>
+  <g shape-rendering="crispEdges">
+    <path fill="#5b6ee1" d="M96 96h64v64H96zm64 0h64v64h-64zm64 0h64v64h-64zm64 0h64v64h-64z"/>
+    <path fill="#6abe30" d="M96 192h64v64H96zm64 0h64v64h-64zm64 64h64v64h-64zm64 64h64v64h-64z"/>
+    <path fill="#d9a441" d="M352 192h64v64h-64zm0 64h64v64h-64zm0 64h64v64h-64zm-64 64h64v64h-64z"/>
+    <path fill="#d95763" d="M96 352h64v64H96zm64 0h64v64h-64zm64 0h64v64h-64zm64 0h64v64h-64z"/>
+  </g>
+  <path d="M32 32h448v24H32zm0 424h448v24H32z" fill="#f8f8d8"/>
+  <path d="M32 32h24v448H32zm424 0h24v448h-24z" fill="#f8f8d8"/>
+</svg>
