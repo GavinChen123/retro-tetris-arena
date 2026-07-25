@@ -143,9 +143,88 @@ app.post("/api/friends/accept", (req, res) => {
 const socketsByUser = new Map();
 let quickQueue = [];
 const matches = new Map();
+const parties = new Map();
 
 function emitUser(username, event, payload) {
   for (const id of socketsByUser.get(cleanName(username)) || []) io.to(id).emit(event, payload);
+}
+
+function publicParties() {
+  return [...parties.values()].map((party) => ({
+    id: party.id,
+    name: party.name,
+    count: party.players.size,
+    max: 4,
+    inGame: !!party.matchId
+  }));
+}
+
+function emitPartyList() {
+  io.emit("party:list", publicParties());
+}
+
+function playerPayload(player) {
+  return { username: player.username };
+}
+
+function leaveParty(socket) {
+  const party = parties.get(socket.data.partyId);
+  if (!party) return;
+  party.players.delete(socket.id);
+  socket.leave(party.id);
+  socket.data.partyId = null;
+  if (party.matchId) {
+    const match = matches.get(party.matchId);
+    if (match) {
+      socket.leave(match.id);
+      match.alive.delete(socket.id);
+      match.players = match.players.filter((player) => player.socket.id !== socket.id);
+      socket.to(match.id).emit("opponent:dead", { from: socket.data.username });
+      socket.to(match.id).emit("party:players", { players: match.players.map(playerPayload) });
+      if (match.players.length < 2) {
+        socket.to(match.id).emit("match:win", { reason: "party ended" });
+        matches.delete(match.id);
+        party.matchId = null;
+      }
+    }
+  }
+  if (!party.players.size) parties.delete(party.id);
+  else io.to(party.id).emit("party:players", { players: [...party.players.values()].map(playerPayload) });
+  socket.data.matchId = null;
+  emitPartyList();
+}
+
+function startPartyMatch(party) {
+  const players = [...party.players.values()];
+  if (players.length < 2) {
+    io.to(party.id).emit("notice", { type: "ok", message: `Party ${party.name}: waiting for players.` });
+    emitPartyList();
+    return;
+  }
+  let match = matches.get(party.matchId);
+  if (!match) {
+    const id = crypto.randomBytes(8).toString("hex");
+    match = { id, mode: "party", partyId: party.id, players: [], states: {}, alive: new Map() };
+    matches.set(id, match);
+    party.matchId = id;
+  }
+  match.players = players;
+  for (const player of players) {
+    player.socket.join(match.id);
+    player.socket.data.matchId = match.id;
+    player.socket.data.partyId = party.id;
+    match.alive.set(player.socket.id, true);
+  }
+  for (const player of players) {
+    player.socket.emit("match:start", {
+      matchId: match.id,
+      mode: "party",
+      party: { id: party.id, name: party.name },
+      opponents: players.filter((other) => other.socket.id !== player.socket.id).map((other) => other.username)
+    });
+  }
+  io.to(party.id).emit("party:players", { players: players.map(playerPayload) });
+  emitPartyList();
 }
 
 function makeMatch(playerA, playerB, mode = "human") {
@@ -162,10 +241,12 @@ function makeMatch(playerA, playerB, mode = "human") {
   playerB.socket.join(id);
   playerA.socket.data.matchId = id;
   playerB.socket.data.matchId = id;
+  playerA.socket.data.partyId = null;
+  playerB.socket.data.partyId = null;
   playerA.socket.data.lastOpponent = playerB.username;
   playerB.socket.data.lastOpponent = playerA.username;
-  playerA.socket.emit("match:start", { matchId: id, side: 0, opponent: playerB.username });
-  playerB.socket.emit("match:start", { matchId: id, side: 1, opponent: playerA.username });
+  playerA.socket.emit("match:start", { matchId: id, mode, side: 0, opponent: playerB.username });
+  playerB.socket.emit("match:start", { matchId: id, mode, side: 1, opponent: playerA.username });
 }
 
 function createChallenge(from, to, options = {}) {
@@ -195,8 +276,10 @@ io.on("connection", (socket) => {
   if (!socketsByUser.has(username)) socketsByUser.set(username, new Set());
   socketsByUser.get(username).add(socket.id);
   socket.emit("presence:hello", { username });
+  socket.emit("party:list", publicParties());
 
   socket.on("quick:join", () => {
+    leaveParty(socket);
     quickQueue = quickQueue.filter((p) => p.socket.connected && p.socket.id !== socket.id);
     const opponent = quickQueue.shift();
     if (opponent) makeMatch(opponent, { socket, username }, "quick");
@@ -210,7 +293,61 @@ io.on("connection", (socket) => {
     quickQueue = quickQueue.filter((p) => p.socket.id !== socket.id);
   });
 
+  socket.on("party:list", () => {
+    socket.emit("party:list", publicParties());
+  });
+
+  socket.on("party:create", ({ name, password } = {}) => {
+    const partyName = String(name || "").trim().slice(0, 24);
+    const partyPassword = String(password || "");
+    if (!partyName) return socket.emit("notice", { type: "error", message: "Party needs a name." });
+    if (!partyPassword) return socket.emit("notice", { type: "error", message: "Party needs a password." });
+    leaveParty(socket);
+    const id = crypto.randomBytes(8).toString("hex");
+    const party = {
+      id,
+      name: partyName,
+      password: partyPassword,
+      owner: username,
+      players: new Map([[socket.id, { socket, username }]]),
+      matchId: null,
+      createdAt: Date.now()
+    };
+    parties.set(id, party);
+    socket.join(id);
+    socket.data.partyId = id;
+    socket.emit("party:joined", { party: { id, name: party.name }, players: [...party.players.values()].map(playerPayload) });
+    socket.emit("notice", { type: "ok", message: `Party ${party.name} created. Waiting for players.` });
+    emitPartyList();
+  });
+
+  socket.on("party:join", ({ id, password } = {}) => {
+    const party = parties.get(String(id || ""));
+    if (!party) return socket.emit("notice", { type: "error", message: "Party not found." });
+    if (party.players.size >= 4 && !party.players.has(socket.id)) return socket.emit("notice", { type: "error", message: "That party is full." });
+    if (party.password !== String(password || "")) return socket.emit("notice", { type: "error", message: "Wrong party password." });
+    leaveParty(socket);
+    party.players.set(socket.id, { socket, username });
+    socket.join(party.id);
+    socket.data.partyId = party.id;
+    socket.emit("party:joined", { party: { id: party.id, name: party.name }, players: [...party.players.values()].map(playerPayload) });
+    io.to(party.id).emit("notice", { type: "ok", message: `${username} joined ${party.name}.` });
+    startPartyMatch(party);
+  });
+
+  socket.on("party:leave", () => {
+    leaveParty(socket);
+    socket.emit("notice", { type: "ok", message: "Left party." });
+  });
+
+  socket.on("party:restart", () => {
+    const party = parties.get(socket.data.partyId);
+    if (!party) return socket.emit("notice", { type: "error", message: "Join a party first." });
+    startPartyMatch(party);
+  });
+
   socket.on("challenge:send", ({ to }) => {
+    leaveParty(socket);
     const target = cleanName(to);
     if (!socket.data.user) return socket.emit("notice", { type: "error", message: "Sign in to challenge friends." });
     if (!areFriends(username, target)) return socket.emit("notice", { type: "error", message: "You can only challenge friends." });
@@ -236,25 +373,45 @@ io.on("connection", (socket) => {
     if (!challengerSocket) return socket.emit("notice", { type: "error", message: "That player is offline." });
     db.challenges = db.challenges.filter((c) => c.id !== id);
     saveDb();
+    leaveParty(socket);
+    leaveParty(challengerSocket);
     makeMatch({ socket: challengerSocket, username: challenge.from }, { socket, username }, "challenge");
   });
 
   socket.on("game:state", (state) => {
     const match = matches.get(socket.data.matchId);
     if (!match) return;
-    socket.to(match.id).emit("opponent:state", state);
+    socket.to(match.id).emit("opponent:state", { from: username, state });
   });
 
   socket.on("game:attack", ({ rows = 1 }) => {
     const match = matches.get(socket.data.matchId);
     if (!match) return;
-    socket.to(match.id).emit("opponent:attack", { rows: Math.max(1, Math.min(6, Number(rows) || 1)) });
+    const attackRows = Math.max(1, Math.min(6, Number(rows) || 1));
+    for (const player of match.players) {
+      if (player.socket.id !== socket.id && match.alive.get(player.socket.id) !== false) {
+        player.socket.emit("opponent:attack", { rows: attackRows });
+      }
+    }
   });
 
   socket.on("game:dead", () => {
     const match = matches.get(socket.data.matchId);
     if (!match) return;
     match.alive.set(socket.id, false);
+    if (match.mode === "party") {
+      socket.to(match.id).emit("opponent:dead", { from: username });
+      const alivePlayers = match.players.filter((player) => match.alive.get(player.socket.id));
+      socket.emit("match:lose", { reason: "you topped out" });
+      if (alivePlayers.length === 1) {
+        alivePlayers[0].socket.emit("match:win", { reason: "last player standing" });
+        matches.delete(match.id);
+        const party = parties.get(match.partyId);
+        if (party) party.matchId = null;
+        emitPartyList();
+      }
+      return;
+    }
     socket.to(match.id).emit("match:win", { reason: "opponent topped out" });
     socket.emit("match:lose", { reason: "you topped out" });
     matches.delete(match.id);
@@ -263,10 +420,22 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     socketsByUser.get(username)?.delete(socket.id);
     quickQueue = quickQueue.filter((p) => p.socket.id !== socket.id);
+    leaveParty(socket);
     const match = matches.get(socket.data.matchId);
     if (match) {
-      socket.to(match.id).emit("match:win", { reason: "opponent disconnected" });
-      matches.delete(match.id);
+      if (match.mode === "party") {
+        match.players = match.players.filter((player) => player.socket.id !== socket.id);
+        match.alive.delete(socket.id);
+        socket.to(match.id).emit("opponent:dead", { from: username });
+        socket.to(match.id).emit("party:players", { players: match.players.map(playerPayload) });
+        if (match.players.filter((player) => match.alive.get(player.socket.id)).length <= 1) {
+          socket.to(match.id).emit("match:win", { reason: "last player standing" });
+          matches.delete(match.id);
+        }
+      } else {
+        socket.to(match.id).emit("match:win", { reason: "opponent disconnected" });
+        matches.delete(match.id);
+      }
     }
   });
 });

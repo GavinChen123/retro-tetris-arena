@@ -46,12 +46,15 @@ let socket = null;
 let mode = "single";
 let playerGame = null;
 let opponentGame = null;
+let opponentGames = new Map();
+let opponentCards = new Map();
 let animationId = null;
 let computerTimer = null;
 let socketScriptPromise = null;
 let selectedDifficulty = "easy";
 let lastDownTapAt = 0;
 let currentHumanOpponent = null;
+let currentParty = null;
 const HARD_DROP_TAP_MS = 340;
 const URANIUM_USERNAME = "ieaturanium";
 const URANIUM_GARBAGE_DODGE_CHANCE = 0.3;
@@ -388,6 +391,86 @@ function addIncomingGarbage(game, rows) {
   game?.addGarbage(rows, { dodgeChance: incomingGarbageDodgeChance() });
 }
 
+function resetOpponentCards() {
+  document.querySelectorAll(".opponent-card.generated").forEach((card) => card.remove());
+  opponentGames = new Map();
+  opponentCards = new Map();
+  opponentGame = null;
+  ids("opponentCard").classList.add("hidden");
+  ids("opponentName").textContent = "Opponent";
+  ids("opponentStatus").textContent = "Ready";
+}
+
+function ensureOpponentGame(username) {
+  const name = username || "Opponent";
+  if (opponentGames.has(name)) return opponentGames.get(name);
+  const usePrimary = opponentGames.size === 0;
+  const card = usePrimary ? ids("opponentCard") : createOpponentCard();
+  card.classList.remove("hidden");
+  const nameEl = card.querySelector("[data-opponent-name]") || ids("opponentName");
+  const statusEl = card.querySelector("[data-opponent-status]") || ids("opponentStatus");
+  const canvas = card.querySelector("[data-opponent-board]") || ids("opponentBoard");
+  const nextCanvas = card.querySelector("[data-opponent-next]") || ids("opponentNext");
+  nameEl.textContent = name;
+  statusEl.textContent = "Playing";
+  const game = new TetrisGame(canvas, { nextCanvas });
+  opponentGames.set(name, game);
+  opponentCards.set(name, card);
+  if (usePrimary) opponentGame = game;
+  return game;
+}
+
+function createOpponentCard() {
+  const card = document.createElement("article");
+  card.className = "board-card opponent-card generated";
+  card.innerHTML = `
+    <h2 data-opponent-name>Opponent</h2>
+    <div class="play-area">
+      <canvas class="board-canvas" data-opponent-board width="240" height="576"></canvas>
+      <aside class="next-box">
+        <span>Next</span>
+        <canvas class="next-canvas" data-opponent-next width="112" height="96"></canvas>
+      </aside>
+    </div>
+    <div class="stats"><span>Status <b data-opponent-status>Ready</b></span></div>
+  `;
+  ids("opponentCard").after(card);
+  return card;
+}
+
+function setOpponentStatus(username, status) {
+  const names = username ? [username] : [...opponentGames.keys()];
+  for (const name of names) {
+    const card = opponentCards.get(name);
+    const statusEl = card?.querySelector("[data-opponent-status]") || (card === ids("opponentCard") ? ids("opponentStatus") : null);
+    if (statusEl) statusEl.textContent = status;
+  }
+}
+
+function renderParties(parties = []) {
+  const list = ids("partyList");
+  if (!list) return;
+  list.innerHTML = parties.length
+    ? parties.map((party) => `
+      <div class="party-line">
+        <span>${escapeHtml(party.name)}</span>
+        <span class="party-meta">${party.count}/${party.max}${party.inGame ? " playing" : ""}</span>
+        <button data-party-join="${escapeHtml(party.id)}" data-party-name="${escapeHtml(party.name)}">Join</button>
+      </div>
+    `).join("")
+    : `<p class="notice">No active parties.</p>`;
+}
+
+function escapeHtml(value) {
+  return String(value || "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
 function setStatus(message) { ids("status").textContent = message; }
 function show(id) {
   ["menu", "multiMenu", "humanMenu", "arena"].forEach((name) => ids(name).classList.toggle("hidden", name !== id));
@@ -516,15 +599,26 @@ async function connectSocket() {
   if (socket?.connected) return true;
   socket = io({ auth: { token } });
   socket.on("quick:waiting", () => setStatus("Waiting for another quick play challenger..."));
-  socket.on("match:start", ({ opponent }) => startHumanMatch(opponent));
-  socket.on("opponent:state", (state) => {
-    if (!opponentGame) opponentGame = new TetrisGame(ids("opponentBoard"), { nextCanvas: ids("opponentNext") });
-    opponentGame.loadSnapshot(state);
-    ids("opponentStatus").textContent = state.dead ? "Out" : "Playing";
+  socket.on("match:start", (match) => startHumanMatch(match));
+  socket.on("opponent:state", (payload) => {
+    const state = payload.state || payload;
+    const opponent = payload.from || currentHumanOpponent || "Opponent";
+    const game = ensureOpponentGame(opponent);
+    game.loadSnapshot(state);
+    setOpponentStatus(opponent, state.dead ? "Out" : "Playing");
   });
   socket.on("opponent:attack", ({ rows }) => addIncomingGarbage(playerGame, rows));
+  socket.on("opponent:dead", ({ from }) => setOpponentStatus(from, "Out"));
   socket.on("match:win", ({ reason }) => endMatch(`You win: ${reason}.`));
   socket.on("match:lose", ({ reason }) => endMatch(`You lose: ${reason}.`));
+  socket.on("party:list", renderParties);
+  socket.on("party:joined", ({ party, players }) => {
+    currentParty = party;
+    setStatus(`Joined ${party.name}. ${players.length < 2 ? "Waiting for players." : "Starting match."}`);
+  });
+  socket.on("party:players", ({ players }) => {
+    if (currentParty) ids("matchLabel").textContent = `${currentParty.name}: ${players.map((player) => player.username).join(" vs ")}`;
+  });
   socket.on("challenge:incoming", (challenge) => {
     const label = challenge.rematch ? `${challenge.from} wants a rematch` : `${challenge.from} challenged you`;
     setStatus(`${label}.`);
@@ -549,6 +643,8 @@ function loadSocketScript() {
 function startSingle() {
   mode = "single";
   currentHumanOpponent = null;
+  currentParty = null;
+  resetOpponentCards();
   ids("opponentCard").classList.add("hidden");
   ids("matchLabel").textContent = "Singleplayer";
   startArena("Singleplayer ready.");
@@ -557,6 +653,8 @@ function startSingle() {
 function startComputer() {
   mode = "computer";
   currentHumanOpponent = null;
+  currentParty = null;
+  resetOpponentCards();
   const difficulty = AI_DIFFICULTIES[selectedDifficulty];
   ids("opponentCard").classList.remove("hidden");
   ids("opponentName").textContent = `CPU ${difficulty.label}`;
@@ -572,12 +670,20 @@ function startComputer() {
   computerTimer = setInterval(() => opponentGame.aiStep(), difficulty.stepMs);
 }
 
-function startHumanMatch(opponent) {
-  mode = "human";
-  currentHumanOpponent = opponent;
-  ids("opponentCard").classList.remove("hidden");
-  ids("opponentName").textContent = opponent;
-  ids("matchLabel").textContent = `Vs ${opponent}`;
+function startHumanMatch(match) {
+  const partyMode = match.mode === "party";
+  mode = partyMode ? "party" : "human";
+  currentParty = partyMode ? match.party : null;
+  currentHumanOpponent = partyMode ? null : match.opponent;
+  resetOpponentCards();
+  if (partyMode) {
+    (match.opponents || []).forEach(ensureOpponentGame);
+    ids("matchLabel").textContent = `${match.party.name}: party battle`;
+    startArena("Party fight started. Clearing N rows sends N-1 garbage rows to everyone else.");
+    return;
+  }
+  ensureOpponentGame(match.opponent);
+  ids("matchLabel").textContent = `Vs ${match.opponent}`;
   startArena("Fight started. Clearing N rows sends N-1 garbage rows.");
 }
 
@@ -589,27 +695,34 @@ async function requestHumanRematch() {
   if (await connectSocket()) socket.emit("rematch:request", { to: currentHumanOpponent });
 }
 
+function restartParty() {
+  if (!currentParty) {
+    setStatus("Join a party first.");
+    return;
+  }
+  socket?.emit("party:restart");
+}
+
 function startArena(message) {
   stopLoops();
   show("arena");
   setStatus(message);
   ids("score").textContent = "0";
   ids("lines").textContent = "0";
-  ids("opponentStatus").textContent = "Ready";
   opponentGame = mode === "single" ? null : opponentGame;
   playerGame = new TetrisGame(ids("playerBoard"), {
     nextCanvas: ids("playerNext"),
     onAttack: (rows) => {
-      if (mode === "human") socket?.emit("game:attack", { rows });
+      if (mode === "human" || mode === "party") socket?.emit("game:attack", { rows });
       if (mode === "computer") opponentGame?.addGarbage(rows);
     },
     onChange: (state) => {
       ids("score").textContent = state.score;
       ids("lines").textContent = state.lines;
-      if (mode === "human") socket?.emit("game:state", state);
+      if (mode === "human" || mode === "party") socket?.emit("game:state", state);
     },
     onDead: () => {
-      if (mode === "human") socket?.emit("game:dead");
+      if (mode === "human" || mode === "party") socket?.emit("game:dead");
       else if (mode === "computer") endMatch("You lose: you topped out.");
       else setStatus("Game over. Restart to try again.");
     }
@@ -635,6 +748,7 @@ function endMatch(message) {
   setStatus(message);
   if (playerGame) playerGame.paused = true;
   if (opponentGame) opponentGame.paused = true;
+  opponentGames.forEach((game) => { game.paused = true; });
   stopLoops();
 }
 
@@ -692,7 +806,11 @@ ids("registerBtn").addEventListener("click", async () => {
 ids("logoutBtn").addEventListener("click", logout);
 ids("singleBtn").addEventListener("click", startSingle);
 ids("multiBtn").addEventListener("click", () => show("multiMenu"));
-ids("vsHumanBtn").addEventListener("click", () => { show("humanMenu"); refreshMe(); connectSocket(); });
+ids("vsHumanBtn").addEventListener("click", async () => {
+  show("humanMenu");
+  refreshMe();
+  if (await connectSocket()) socket.emit("party:list");
+});
 ids("vsComputerBtn").addEventListener("click", startComputer);
 document.querySelectorAll(".difficultyBtn").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -701,10 +819,23 @@ document.querySelectorAll(".difficultyBtn").forEach((btn) => {
   });
 });
 document.querySelectorAll(".backBtn").forEach((btn) => btn.addEventListener("click", () => show("menu")));
-ids("homeBtn").addEventListener("click", () => { stopLoops(); show("menu"); });
-ids("restartBtn").addEventListener("click", () => mode === "computer" ? startComputer() : mode === "single" ? startSingle() : requestHumanRematch());
+ids("homeBtn").addEventListener("click", () => {
+  if (mode === "party") socket?.emit("party:leave");
+  currentParty = null;
+  stopLoops();
+  show("menu");
+});
+ids("restartBtn").addEventListener("click", () => mode === "computer" ? startComputer() : mode === "single" ? startSingle() : mode === "party" ? restartParty() : requestHumanRematch());
 ids("quickBtn").addEventListener("click", async () => {
   if (await connectSocket()) socket.emit("quick:join");
+});
+
+ids("partyForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (await connectSocket()) {
+    socket.emit("party:create", { name: ids("partyName").value, password: ids("partyPassword").value });
+    ids("partyPassword").value = "";
+  }
 });
 
 ids("friendForm").addEventListener("submit", async (event) => {
@@ -720,6 +851,7 @@ document.body.addEventListener("click", async (event) => {
   const accept = event.target.dataset.accept;
   const challenge = event.target.dataset.challenge;
   const acceptChallenge = event.target.dataset.acceptChallenge;
+  const partyJoin = event.target.dataset.partyJoin;
   try {
     if (accept) {
       await api("/api/friends/accept", { username: accept });
@@ -731,6 +863,10 @@ document.body.addEventListener("click", async (event) => {
     }
     if (acceptChallenge) {
       if (await connectSocket()) socket.emit("challenge:accept", { id: acceptChallenge });
+    }
+    if (partyJoin) {
+      const password = window.prompt(`Password for ${event.target.dataset.partyName || "party"}:`);
+      if (password !== null && await connectSocket()) socket.emit("party:join", { id: partyJoin, password });
     }
   } catch (error) { setStatus(error.message); }
 });

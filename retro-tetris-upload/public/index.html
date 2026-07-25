@@ -58,6 +58,15 @@
           <div>
             <h2>Quick Play</h2>
             <button id="quickBtn" class="wide">Find Anyone</button>
+            <div class="party-panel">
+              <h2>Active Parties</h2>
+              <form id="partyForm" class="party-form">
+                <input id="partyName" placeholder="party name" maxlength="24" />
+                <input id="partyPassword" type="password" placeholder="password" />
+                <button>Create</button>
+              </form>
+              <div id="partyList" class="party-list"></div>
+            </div>
           </div>
           <div>
             <h2>Friends</h2>
@@ -90,7 +99,7 @@
             </div>
             <div class="stats"><span>Score <b id="score">0</b></span><span>Lines <b id="lines">0</b></span></div>
           </article>
-          <article class="board-card" id="opponentCard">
+          <article class="board-card opponent-card" id="opponentCard">
             <h2 id="opponentName">Opponent</h2>
             <div class="play-area">
               <canvas class="board-canvas" id="opponentBoard" width="240" height="576"></canvas>

@@ -77,13 +77,18 @@ h2 { font-size: 20px; margin-bottom: 12px; color: var(--gold); }
 .split { display: grid; grid-template-columns: 1fr 1.5fr; gap: 22px; margin-bottom: 20px; }
 .row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
 .wide { width: 100%; min-height: 74px; color: var(--green); }
+.party-panel { display: grid; gap: 10px; margin-top: 18px; }
+.party-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+.party-list { display: grid; gap: 8px; }
+.party-line { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; }
+.party-meta { color: var(--gold); font-size: 14px; }
 .friend-line { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; margin-top: 10px; }
 .notice { margin-top: 10px; color: var(--gold); }
 .hidden { display: none !important; }
 .arena { display: grid; gap: 18px; }
 .hud { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 #matchLabel { color: var(--gold); font-weight: 700; margin-left: auto; }
-.boards { display: grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap: 24px; align-items: start; }
+.boards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; align-items: start; }
 .board-card { display: grid; justify-items: center; gap: 10px; }
 .play-area {
   display: grid;
@@ -119,6 +124,7 @@ h2 { font-size: 20px; margin-bottom: 12px; color: var(--gold); }
 @media (max-width: 760px) {
   .topbar, .menu, .split, .boards { grid-template-columns: 1fr; }
   .auth { grid-template-columns: 1fr; }
+  .party-form, .party-line { grid-template-columns: 1fr; }
   #matchLabel { margin-left: 0; width: 100%; }
   .play-area { grid-template-columns: minmax(170px, 260px) 96px; }
   .next-canvas { width: 96px; height: 84px; }

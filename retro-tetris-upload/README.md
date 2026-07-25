@@ -5,6 +5,7 @@ An old 8-bit styled Tetris game with:
 - Singleplayer Tetris
 - Multiplayer menu with vs Computer playable in the browser
 - Realtime vs Human matchmaking, friends, challenges, and accounts when the Node server is running
+- Party battles for up to 4 players, with password-protected active parties
 - GitHub Pages deployment for a playable static browser version
 
 ## Play Locally
