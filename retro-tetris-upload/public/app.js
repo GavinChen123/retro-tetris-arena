@@ -58,6 +58,7 @@ let currentParty = null;
 let restartCountdownTimer = null;
 let restartSecondsLeft = 0;
 let currentRestartRequestId = null;
+let pendingPartyJoinId = null;
 const HARD_DROP_TAP_MS = 340;
 const URANIUM_USERNAME = "ieaturanium";
 const URANIUM_GARBAGE_DODGE_CHANCE = 0.3;
@@ -503,6 +504,19 @@ function hideRestartPrompt() {
   ids("restartModal").classList.add("hidden");
 }
 
+function showJoinPartyPrompt(id, name) {
+  pendingPartyJoinId = id;
+  ids("joinPartyMessage").textContent = `Enter the password for ${name || "this party"}.`;
+  ids("joinPartyPassword").value = "";
+  ids("joinPartyModal").classList.remove("hidden");
+  ids("joinPartyPassword").focus();
+}
+
+function hideJoinPartyPrompt() {
+  pendingPartyJoinId = null;
+  ids("joinPartyModal").classList.add("hidden");
+}
+
 function sendBothPlayersToMenu(message) {
   hideRestartPrompt();
   stopLoops();
@@ -892,6 +906,15 @@ ids("leaveRestartBtn").addEventListener("click", () => {
   hideRestartPrompt();
   socket?.emit("restart:leave", { id });
 });
+ids("joinPartyForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!pendingPartyJoinId) return;
+  const id = pendingPartyJoinId;
+  const password = ids("joinPartyPassword").value;
+  hideJoinPartyPrompt();
+  if (await connectSocket()) socket.emit("party:join", { id, password });
+});
+ids("cancelJoinPartyBtn").addEventListener("click", hideJoinPartyPrompt);
 ids("quickBtn").addEventListener("click", async () => {
   if (await connectSocket()) socket.emit("quick:join");
 });
@@ -931,8 +954,7 @@ document.body.addEventListener("click", async (event) => {
       if (await connectSocket()) socket.emit("challenge:accept", { id: acceptChallenge });
     }
     if (partyJoin) {
-      const password = window.prompt(`Password for ${event.target.dataset.partyName || "party"}:`);
-      if (password !== null && await connectSocket()) socket.emit("party:join", { id: partyJoin, password });
+      showJoinPartyPrompt(partyJoin, event.target.dataset.partyName || "party");
     }
   } catch (error) { setStatus(error.message); }
 });
