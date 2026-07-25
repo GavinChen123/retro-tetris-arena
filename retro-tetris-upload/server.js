@@ -218,6 +218,19 @@ function leaveParty(socket) {
   emitPartyList();
 }
 
+function deleteParty(party, reason = "party deleted") {
+  const match = matches.get(party.matchId);
+  if (match) clearMatch(match);
+  io.to(party.id).emit("party:deleted", { id: party.id, name: party.name, reason });
+  for (const player of party.players.values()) {
+    player.socket.leave(party.id);
+    if (player.socket.data.partyId === party.id) player.socket.data.partyId = null;
+    if (player.socket.data.matchId === party.matchId) player.socket.data.matchId = null;
+  }
+  parties.delete(party.id);
+  emitPartyList();
+}
+
 function startPartyMatch(party) {
   const players = [...party.players.values()];
   if (players.length < 2) {
@@ -342,6 +355,7 @@ io.on("connection", (socket) => {
     socket.join(id);
     socket.data.partyId = id;
     socket.emit("party:joined", { party: { id, name: party.name, owner: party.owner }, players: [...party.players.values()].map(playerPayload) });
+    socket.emit("party:players", { players: [...party.players.values()].map(playerPayload) });
     socket.emit("notice", { type: "ok", message: `Party ${party.name} created. Waiting for players.` });
     emitPartyList();
   });
@@ -349,6 +363,13 @@ io.on("connection", (socket) => {
   socket.on("party:join", ({ id, password } = {}) => {
     const party = parties.get(String(id || ""));
     if (!party) return socket.emit("notice", { type: "error", message: "Party not found." });
+    if (party.players.has(socket.id)) {
+      const players = [...party.players.values()].map(playerPayload);
+      socket.emit("party:joined", { party: { id: party.id, name: party.name, owner: party.owner }, players });
+      socket.emit("party:players", { players });
+      return;
+    }
+    if (party.matchId && !party.players.has(socket.id)) return socket.emit("notice", { type: "error", message: "That party is already playing." });
     if (party.players.size >= 4 && !party.players.has(socket.id)) return socket.emit("notice", { type: "error", message: "That party is full." });
     if (party.password !== String(password || "")) return socket.emit("notice", { type: "error", message: "Wrong party password." });
     leaveParty(socket);
@@ -357,7 +378,8 @@ io.on("connection", (socket) => {
     socket.data.partyId = party.id;
     socket.emit("party:joined", { party: { id: party.id, name: party.name, owner: party.owner }, players: [...party.players.values()].map(playerPayload) });
     io.to(party.id).emit("notice", { type: "ok", message: `${username} joined ${party.name}.` });
-    startPartyMatch(party);
+    io.to(party.id).emit("party:players", { players: [...party.players.values()].map(playerPayload) });
+    emitPartyList();
   });
 
   socket.on("party:leave", () => {
@@ -370,6 +392,20 @@ io.on("connection", (socket) => {
     if (!party) return socket.emit("notice", { type: "error", message: "Join a party first." });
     if (party.owner !== username) return socket.emit("notice", { type: "error", message: "Only the party creator can restart." });
     startPartyMatch(party);
+  });
+
+  socket.on("party:start", () => {
+    const party = parties.get(socket.data.partyId);
+    if (!party) return socket.emit("notice", { type: "error", message: "Join a party first." });
+    if (party.owner !== username) return socket.emit("notice", { type: "error", message: "Only the party creator can start." });
+    startPartyMatch(party);
+  });
+
+  socket.on("party:delete", () => {
+    const party = parties.get(socket.data.partyId);
+    if (!party) return socket.emit("notice", { type: "error", message: "Join a party first." });
+    if (party.owner !== username) return socket.emit("notice", { type: "error", message: "Only the party creator can delete." });
+    deleteParty(party);
   });
 
   socket.on("challenge:send", ({ to }) => {

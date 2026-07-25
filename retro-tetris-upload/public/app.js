@@ -42,6 +42,7 @@ const localFriendsKey = "retroTetrisLocalFriends";
 
 let token = localStorage.getItem(tokenKey);
 let me = null;
+let socketUsername = null;
 let socket = null;
 let mode = "single";
 let playerGame = null;
@@ -55,6 +56,7 @@ let selectedDifficulty = "easy";
 let lastDownTapAt = 0;
 let currentHumanOpponent = null;
 let currentParty = null;
+let currentPartyPlayers = [];
 let restartCountdownTimer = null;
 let restartSecondsLeft = 0;
 let currentRestartRequestId = null;
@@ -384,7 +386,7 @@ class TetrisGame {
 }
 
 function currentUsername() {
-  return (me?.username || "").toLowerCase();
+  return (me?.username || socketUsername || "").toLowerCase();
 }
 
 function incomingGarbageDodgeChance() {
@@ -459,10 +461,25 @@ function renderParties(parties = []) {
       <div class="party-line">
         <span>${escapeHtml(party.name)}</span>
         <span class="party-meta">${party.count}/${party.max}${party.inGame ? " playing" : ""}</span>
-        <button data-party-join="${escapeHtml(party.id)}" data-party-name="${escapeHtml(party.name)}">Join</button>
+        <button data-party-join="${escapeHtml(party.id)}" data-party-name="${escapeHtml(party.name)}"${party.inGame ? " disabled" : ""}>Join</button>
       </div>
     `).join("")
     : `<p class="notice">No active parties.</p>`;
+}
+
+function renderCurrentParty(players = currentPartyPlayers) {
+  const panel = ids("currentPartyPanel");
+  if (!currentParty) {
+    panel.classList.add("hidden");
+    return;
+  }
+  currentPartyPlayers = players;
+  const isOwner = currentParty.owner === currentUsername();
+  panel.classList.remove("hidden");
+  ids("currentPartyName").textContent = `${currentParty.name} (${players.length}/4)`;
+  ids("partyPlayers").innerHTML = players.map((player) => `<div>${escapeHtml(player.username)}${player.username === currentParty.owner ? " owner" : ""}</div>`).join("");
+  ids("startPartyBtn").classList.toggle("hidden", !isOwner);
+  ids("deletePartyBtn").classList.toggle("hidden", !isOwner);
 }
 
 function renderChallenge(challenge) {
@@ -525,6 +542,8 @@ function sendBothPlayersToMenu(message) {
   mode = "single";
   currentHumanOpponent = null;
   currentParty = null;
+  currentPartyPlayers = [];
+  renderCurrentParty();
   show("menu");
   setStatus(message);
 }
@@ -658,6 +677,10 @@ async function connectSocket() {
   }
   if (socket?.connected) return true;
   socket = io({ auth: { token } });
+  socket.on("presence:hello", ({ username }) => {
+    socketUsername = username;
+    renderCurrentParty();
+  });
   socket.on("quick:waiting", () => setStatus("Waiting for another quick play challenger..."));
   socket.on("match:start", (match) => startHumanMatch(match));
   socket.on("opponent:state", (payload) => {
@@ -680,10 +703,18 @@ async function connectSocket() {
   socket.on("party:list", renderParties);
   socket.on("party:joined", ({ party, players }) => {
     currentParty = party;
-    setStatus(`Joined ${party.name}. ${players.length < 2 ? "Waiting for players." : "Starting match."}`);
+    renderCurrentParty(players);
+    setStatus(`Joined ${party.name}. ${players.length < 2 ? "Waiting for players." : "Ready to start."}`);
   });
   socket.on("party:players", ({ players }) => {
+    renderCurrentParty(players);
     if (currentParty) ids("matchLabel").textContent = `${currentParty.name}: ${players.map((player) => player.username).join(" vs ")}`;
+  });
+  socket.on("party:deleted", ({ name }) => {
+    currentParty = null;
+    currentPartyPlayers = [];
+    renderCurrentParty();
+    sendBothPlayersToMenu(`${name} was deleted.`);
   });
   socket.on("challenge:incoming", (challenge) => {
     const label = challenge.rematch ? `${challenge.from} wants a rematch` : `${challenge.from} challenged you`;
@@ -710,6 +741,8 @@ function startSingle() {
   mode = "single";
   currentHumanOpponent = null;
   currentParty = null;
+  currentPartyPlayers = [];
+  renderCurrentParty();
   resetOpponentCards();
   ids("opponentCard").classList.add("hidden");
   ids("matchLabel").textContent = "Singleplayer";
@@ -720,6 +753,8 @@ function startComputer() {
   mode = "computer";
   currentHumanOpponent = null;
   currentParty = null;
+  currentPartyPlayers = [];
+  renderCurrentParty();
   resetOpponentCards();
   const difficulty = AI_DIFFICULTIES[selectedDifficulty];
   ids("opponentCard").classList.remove("hidden");
@@ -892,6 +927,8 @@ document.querySelectorAll(".backBtn").forEach((btn) => btn.addEventListener("cli
 ids("homeBtn").addEventListener("click", () => {
   if (mode === "party") socket?.emit("party:leave");
   currentParty = null;
+  currentPartyPlayers = [];
+  renderCurrentParty();
   stopLoops();
   show("menu");
 });
@@ -915,6 +952,14 @@ ids("joinPartyForm").addEventListener("submit", async (event) => {
   if (await connectSocket()) socket.emit("party:join", { id, password });
 });
 ids("cancelJoinPartyBtn").addEventListener("click", hideJoinPartyPrompt);
+ids("startPartyBtn").addEventListener("click", () => socket?.emit("party:start"));
+ids("leavePartyBtn").addEventListener("click", () => {
+  socket?.emit("party:leave");
+  currentParty = null;
+  currentPartyPlayers = [];
+  renderCurrentParty();
+});
+ids("deletePartyBtn").addEventListener("click", () => socket?.emit("party:delete"));
 ids("quickBtn").addEventListener("click", async () => {
   if (await connectSocket()) socket.emit("quick:join");
 });
@@ -937,10 +982,12 @@ ids("friendForm").addEventListener("submit", async (event) => {
 });
 
 document.body.addEventListener("click", async (event) => {
-  const accept = event.target.dataset.accept;
-  const challenge = event.target.dataset.challenge;
-  const acceptChallenge = event.target.dataset.acceptChallenge;
-  const partyJoin = event.target.dataset.partyJoin;
+  const target = event.target.closest("[data-accept], [data-challenge], [data-accept-challenge], [data-party-join]");
+  if (!target) return;
+  const accept = target.dataset.accept;
+  const challenge = target.dataset.challenge;
+  const acceptChallenge = target.dataset.acceptChallenge;
+  const partyJoin = target.dataset.partyJoin;
   try {
     if (accept) {
       await api("/api/friends/accept", { username: accept });
@@ -954,7 +1001,7 @@ document.body.addEventListener("click", async (event) => {
       if (await connectSocket()) socket.emit("challenge:accept", { id: acceptChallenge });
     }
     if (partyJoin) {
-      showJoinPartyPrompt(partyJoin, event.target.dataset.partyName || "party");
+      showJoinPartyPrompt(partyJoin, target.dataset.partyName || "party");
     }
   } catch (error) { setStatus(error.message); }
 });
