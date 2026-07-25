@@ -113,6 +113,16 @@
         </div>
       </section>
     </main>
+    <div id="restartModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="restartTitle">
+      <div class="modal-panel">
+        <h2 id="restartTitle">Confirm Restart?</h2>
+        <p id="restartMessage">Opponent wants to restart.</p>
+        <div class="modal-actions">
+          <button id="confirmRestartBtn">Confirm</button>
+          <button id="leaveRestartBtn">Leave</button>
+        </div>
+      </div>
+    </div>
     <script src="app.js"></script>
     <script>
       if ("serviceWorker" in navigator) {

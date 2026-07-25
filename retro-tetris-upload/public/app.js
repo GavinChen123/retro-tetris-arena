@@ -55,6 +55,9 @@ let selectedDifficulty = "easy";
 let lastDownTapAt = 0;
 let currentHumanOpponent = null;
 let currentParty = null;
+let restartCountdownTimer = null;
+let restartSecondsLeft = 0;
+let currentRestartRequestId = null;
 const HARD_DROP_TAP_MS = 340;
 const URANIUM_USERNAME = "ieaturanium";
 const URANIUM_GARBAGE_DODGE_CHANCE = 0.3;
@@ -461,6 +464,11 @@ function renderParties(parties = []) {
     : `<p class="notice">No active parties.</p>`;
 }
 
+function renderChallenge(challenge) {
+  const label = challenge.rematch ? `${challenge.from} wants a rematch` : `${challenge.from} challenged you`;
+  return `<div class="friend-line"><span>${escapeHtml(label)}</span><button data-accept-challenge="${escapeHtml(challenge.id)}">Fight</button></div>`;
+}
+
 function escapeHtml(value) {
   return String(value || "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -469,6 +477,42 @@ function escapeHtml(value) {
     "\"": "&quot;",
     "'": "&#39;"
   }[char]));
+}
+
+function showRestartPrompt({ id = null, from, seconds }) {
+  currentRestartRequestId = id;
+  restartSecondsLeft = Math.max(1, Number(seconds) || 10);
+  ids("restartMessage").textContent = `${from} wants to restart. ${restartSecondsLeft}s left.`;
+  ids("restartModal").classList.remove("hidden");
+  clearInterval(restartCountdownTimer);
+  restartCountdownTimer = setInterval(() => {
+    restartSecondsLeft--;
+    if (restartSecondsLeft <= 0) {
+      hideRestartPrompt();
+      setStatus("Restart request expired.");
+      return;
+    }
+    ids("restartMessage").textContent = `${from} wants to restart. ${restartSecondsLeft}s left.`;
+  }, 1000);
+}
+
+function hideRestartPrompt() {
+  clearInterval(restartCountdownTimer);
+  restartCountdownTimer = null;
+  currentRestartRequestId = null;
+  ids("restartModal").classList.add("hidden");
+}
+
+function sendBothPlayersToMenu(message) {
+  hideRestartPrompt();
+  stopLoops();
+  resetOpponentCards();
+  playerGame = null;
+  mode = "single";
+  currentHumanOpponent = null;
+  currentParty = null;
+  show("menu");
+  setStatus(message);
 }
 
 function setStatus(message) { ids("status").textContent = message; }
@@ -568,9 +612,11 @@ async function refreshMe() {
 }
 
 function renderSocial(data) {
-  ids("incoming").innerHTML = data.incoming.map((r) => `<div class="friend-line"><span>${r.from} wants in</span><button data-accept="${r.from}">Accept</button></div>`).join("");
+  const friendRequests = data.incoming.map((r) => `<div class="friend-line"><span>${escapeHtml(r.from)} wants in</span><button data-accept="${escapeHtml(r.from)}">Accept</button></div>`);
+  const challenges = (data.incomingChallenges || []).map(renderChallenge);
+  ids("incoming").innerHTML = [...friendRequests, ...challenges].join("");
   ids("friends").innerHTML = data.friends.length
-    ? data.friends.map((f) => `<div class="friend-line"><span>${f.username}</span><button data-challenge="${f.username}">Challenge</button></div>`).join("")
+    ? data.friends.map((f) => `<div class="friend-line"><span>${escapeHtml(f.username)}</span><button data-challenge="${escapeHtml(f.username)}">Challenge</button></div>`).join("")
     : `<p class="notice">No friends yet.</p>`;
 }
 
@@ -611,6 +657,12 @@ async function connectSocket() {
   socket.on("opponent:dead", ({ from }) => setOpponentStatus(from, "Out"));
   socket.on("match:win", ({ reason }) => endMatch(`You win: ${reason}.`));
   socket.on("match:lose", ({ reason }) => endMatch(`You lose: ${reason}.`));
+  socket.on("match:leave", ({ reason }) => sendBothPlayersToMenu(`Match ended: ${reason}.`));
+  socket.on("restart:prompt", showRestartPrompt);
+  socket.on("restart:expired", () => {
+    hideRestartPrompt();
+    setStatus("Restart request expired.");
+  });
   socket.on("party:list", renderParties);
   socket.on("party:joined", ({ party, players }) => {
     currentParty = party;
@@ -622,7 +674,7 @@ async function connectSocket() {
   socket.on("challenge:incoming", (challenge) => {
     const label = challenge.rematch ? `${challenge.from} wants a rematch` : `${challenge.from} challenged you`;
     setStatus(`${label}.`);
-    ids("incoming").insertAdjacentHTML("afterbegin", `<div class="friend-line"><span>${label}</span><button data-accept-challenge="${challenge.id}">Fight</button></div>`);
+    ids("incoming").insertAdjacentHTML("afterbegin", renderChallenge(challenge));
   });
   socket.on("notice", ({ message }) => setStatus(message));
   return true;
@@ -698,6 +750,10 @@ async function requestHumanRematch() {
 function restartParty() {
   if (!currentParty) {
     setStatus("Join a party first.");
+    return;
+  }
+  if (currentParty.owner && currentParty.owner !== currentUsername()) {
+    setStatus("Only the party creator can restart the party.");
     return;
   }
   socket?.emit("party:restart");
@@ -826,6 +882,16 @@ ids("homeBtn").addEventListener("click", () => {
   show("menu");
 });
 ids("restartBtn").addEventListener("click", () => mode === "computer" ? startComputer() : mode === "single" ? startSingle() : mode === "party" ? restartParty() : requestHumanRematch());
+ids("confirmRestartBtn").addEventListener("click", () => {
+  const id = currentRestartRequestId;
+  hideRestartPrompt();
+  socket?.emit("restart:confirm", { id });
+});
+ids("leaveRestartBtn").addEventListener("click", () => {
+  const id = currentRestartRequestId;
+  hideRestartPrompt();
+  socket?.emit("restart:leave", { id });
+});
 ids("quickBtn").addEventListener("click", async () => {
   if (await connectSocket()) socket.emit("quick:join");
 });

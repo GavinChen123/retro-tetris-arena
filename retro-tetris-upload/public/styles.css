@@ -120,6 +120,25 @@ h2 { font-size: 20px; margin-bottom: 12px; color: var(--gold); }
   box-shadow: 5px 5px 0 var(--shadow), inset 0 0 0 3px #2f2a45;
 }
 .stats { display: flex; gap: 18px; justify-content: center; color: var(--gold); font-size: 18px; }
+.modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(6,5,10,.72);
+  z-index: 10;
+}
+.modal-panel {
+  width: min(420px, 100%);
+  border: 4px solid var(--ink);
+  background: var(--panel);
+  box-shadow: 8px 8px 0 var(--shadow);
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+.modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 @media (max-width: 760px) {
   .topbar, .menu, .split, .boards { grid-template-columns: 1fr; }
