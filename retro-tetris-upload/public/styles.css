@@ -91,6 +91,7 @@ h2 { font-size: 20px; margin-bottom: 12px; color: var(--gold); }
   gap: 10px;
 }
 .party-players { display: grid; gap: 6px; color: var(--gold); }
+.party-hint { margin: 0; color: var(--muted); font-size: 13px; }
 .party-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .friend-line { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; margin-top: 10px; }
 .notice { margin-top: 10px; color: var(--gold); }

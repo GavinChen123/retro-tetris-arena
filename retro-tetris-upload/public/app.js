@@ -478,7 +478,9 @@ function renderCurrentParty(players = currentPartyPlayers) {
   panel.classList.remove("hidden");
   ids("currentPartyName").textContent = `${currentParty.name} (${players.length}/4)`;
   ids("partyPlayers").innerHTML = players.map((player) => `<div>${escapeHtml(player.username)}${player.username === currentParty.owner ? " owner" : ""}</div>`).join("");
+  ids("partyStartHint").textContent = players.length < 2 ? "Need at least 2 players to start." : "Ready. Start with 2-4 players.";
   ids("startPartyBtn").classList.toggle("hidden", !isOwner);
+  ids("startPartyBtn").disabled = players.length < 2;
   ids("deletePartyBtn").classList.toggle("hidden", !isOwner);
 }
 
