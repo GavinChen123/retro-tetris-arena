@@ -474,7 +474,7 @@ function renderCurrentParty(players = currentPartyPlayers) {
     return;
   }
   currentPartyPlayers = players;
-  const isOwner = currentParty.owner === currentUsername();
+  const isOwner = currentParty.isOwner || currentParty.owner === currentUsername();
   panel.classList.remove("hidden");
   ids("currentPartyName").textContent = `${currentParty.name} (${players.length}/4)`;
   ids("partyPlayers").innerHTML = players.map((player) => `<div>${escapeHtml(player.username)}${player.username === currentParty.owner ? " owner" : ""}</div>`).join("");
@@ -803,7 +803,7 @@ function restartParty() {
     setStatus("Join a party first.");
     return;
   }
-  if (currentParty.owner && currentParty.owner !== currentUsername()) {
+  if (!currentParty.isOwner && currentParty.owner && currentParty.owner !== currentUsername()) {
     setStatus("Only the party creator can restart the party.");
     return;
   }
