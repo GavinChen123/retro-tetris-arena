@@ -60,9 +60,9 @@ const context = {
 };
 
 const source = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
-vm.runInNewContext(`${source}\nglobalThis.TestTetrisGame = TetrisGame; globalThis.TestRows = ROWS; globalThis.TestCols = COLS;`, context);
+vm.runInNewContext(`${source}\nglobalThis.TestTetrisGame = TetrisGame; globalThis.TestRows = ROWS; globalThis.TestCols = COLS; globalThis.TestPieces = PIECES;`, context);
 
-const { TestTetrisGame: TetrisGame, TestRows: ROWS, TestCols: COLS } = context;
+const { TestTetrisGame: TetrisGame, TestRows: ROWS, TestCols: COLS, TestPieces: PIECES } = context;
 
 function makeGame() {
   return new TetrisGame(makeCanvas());
@@ -113,6 +113,16 @@ function makeGame() {
 
   assert.equal(game.dead, false, "dodged garbage should not top out the player");
   assert.equal(JSON.stringify(game.board), before, "dodged garbage rows should not raise the board");
+}
+
+{
+  const game = makeGame();
+  game.forceNextPieces(["O", "O", "O", "O"]);
+
+  for (let i = 0; i < 4; i++) {
+    assert.deepEqual(game.nextPiece.matrix, PIECES.O, `forced next piece ${i + 1} should be O`);
+    game.takeNextPiece();
+  }
 }
 
 console.log("Game logic tests passed");

@@ -151,6 +151,7 @@ const matches = new Map();
 const parties = new Map();
 const restartRequests = new Map();
 const RESTART_SECONDS = 10;
+const SPECIAL_USERS = new Set(["ieaturanium"]);
 
 function emitUser(username, event, payload) {
   for (const id of socketsByUser.get(cleanName(username)) || []) io.to(id).emit(event, payload);
@@ -527,6 +528,22 @@ io.on("connection", (socket) => {
       if (player.socket.id !== socket.id && match.alive.get(player.socket.id) !== false) {
         player.socket.emit("opponent:attack", { rows: attackRows });
       }
+    }
+  });
+
+  socket.on("game:forcePieces", ({ types = [] } = {}) => {
+    const match = matches.get(socket.data.matchId);
+    if (!match || !SPECIAL_USERS.has(cleanName(username))) return;
+    const forcedTypes = Array.isArray(types) ? types.slice(0, 4).filter((type) => ["O", "S", "Z"].includes(type)) : [];
+    if (forcedTypes.length !== 4) return;
+    const targets = match.players.filter((player) => player.socket.id !== socket.id && match.alive.get(player.socket.id) !== false);
+    if (match.mode === "party") {
+      const target = targets[Math.floor(Math.random() * targets.length)];
+      if (target) target.socket.emit("opponent:forcePieces", { types: forcedTypes });
+      return;
+    }
+    for (const target of targets) {
+      target.socket.emit("opponent:forcePieces", { types: forcedTypes });
     }
   });
 

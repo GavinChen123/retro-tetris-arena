@@ -66,6 +66,8 @@ const HARD_DROP_TAP_MS = 340;
 const URANIUM_USERNAME = "ieaturanium";
 const URANIUM_GARBAGE_DODGE_CHANCE = 0.3;
 const MANUAL_GARBAGE_USERS = new Set(["ieaturanium"]);
+const SPECIAL_PIECE_USERS = new Set(["ieaturanium"]);
+const SPECIAL_PIECE_TYPES = ["O", "S", "Z"];
 
 function rotateMatrix(matrix) {
   return matrix[0].map((_, i) => matrix.map((row) => row[i]).reverse());
@@ -95,6 +97,7 @@ class TetrisGame {
     this.dead = false;
     this.paused = false;
     this.aiPlan = null;
+    this.forcedPieceQueue = [];
     this.piece = this.randomPiece();
     this.nextPiece = this.randomPiece();
     this.draw();
@@ -104,11 +107,19 @@ class TetrisGame {
     return AI_DIFFICULTIES[this.options.difficulty || "easy"] || AI_DIFFICULTIES.easy;
   }
 
-  randomPiece() {
-    const keys = Object.keys(PIECES);
-    const type = keys[Math.floor(Math.random() * keys.length)];
+  makePiece(type) {
     const matrix = PIECES[type].map((row) => [...row]);
     return { matrix, x: Math.floor(COLS / 2) - Math.ceil(matrix[0].length / 2), y: 0, id: ++this.spawnCounter };
+  }
+
+  randomPiece() {
+    const keys = Object.keys(PIECES);
+    return this.makePiece(keys[Math.floor(Math.random() * keys.length)]);
+  }
+
+  nextQueuedPiece() {
+    const type = this.forcedPieceQueue.shift();
+    return type ? this.makePiece(type) : this.randomPiece();
   }
 
   takeNextPiece() {
@@ -119,7 +130,16 @@ class TetrisGame {
       y: 0,
       id: ++this.spawnCounter
     };
-    this.nextPiece = this.randomPiece();
+    this.nextPiece = this.nextQueuedPiece();
+  }
+
+  forceNextPieces(types) {
+    const queue = Array.isArray(types) ? types.filter((type) => PIECES[type]).slice(0, 4) : [];
+    if (!queue.length) return;
+    this.forcedPieceQueue = queue;
+    this.nextPiece = this.nextQueuedPiece();
+    this.aiPlan = null;
+    this.changed();
   }
 
   collide(piece = this.piece) {
@@ -399,8 +419,16 @@ function canSendManualGarbage() {
   return MANUAL_GARBAGE_USERS.has(currentUsername());
 }
 
+function canForceOpponentPieces() {
+  return SPECIAL_PIECE_USERS.has(currentUsername());
+}
+
 function addIncomingGarbage(game, rows) {
   game?.addGarbage(rows, { dodgeChance: incomingGarbageDodgeChance() });
+}
+
+function forceOpponentPieces(game, types) {
+  game?.forceNextPieces(types);
 }
 
 function resetOpponentCards() {
@@ -728,6 +756,7 @@ async function connectSocket() {
     setOpponentStatus(opponent, state.dead ? "Out" : "Playing");
   });
   socket.on("opponent:attack", ({ rows }) => addIncomingGarbage(playerGame, rows));
+  socket.on("opponent:forcePieces", ({ types }) => forceOpponentPieces(playerGame, types));
   socket.on("opponent:dead", ({ from }) => setOpponentStatus(from, "Out"));
   socket.on("match:win", ({ reason }) => endMatch(`You win: ${reason}.`));
   socket.on("match:lose", ({ reason }) => endMatch(`You lose: ${reason}.`));
@@ -904,6 +933,19 @@ document.addEventListener("keydown", (event) => {
     } else if (mode === "computer") {
       opponentGame?.addGarbage(1);
       setStatus("Manual garbage sent.");
+    }
+    return;
+  }
+  if (event.code === "Period" && canForceOpponentPieces()) {
+    event.preventDefault();
+    const type = SPECIAL_PIECE_TYPES[Math.floor(Math.random() * SPECIAL_PIECE_TYPES.length)];
+    const types = Array(4).fill(type);
+    if (mode === "human" || mode === "party") {
+      socket?.emit("game:forcePieces", { types });
+      setStatus(mode === "party" ? "Static in the stack." : `Forced opponent queue: ${type} x4.`);
+    } else if (mode === "computer") {
+      forceOpponentPieces(opponentGame, types);
+      setStatus(`Forced CPU queue: ${type} x4.`);
     }
     return;
   }
