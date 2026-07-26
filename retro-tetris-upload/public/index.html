@@ -22,6 +22,9 @@
         </div>
         <div class="account" id="accountPanel">
           <form id="authForm" class="auth">
+            <select id="accountSelect" class="account-select" aria-label="Saved accounts">
+              <option value="">Saved accounts</option>
+            </select>
             <input id="username" placeholder="username" autocomplete="username" />
             <input id="password" type="password" placeholder="password" autocomplete="current-password" />
             <button type="submit" data-action="login">Login</button>

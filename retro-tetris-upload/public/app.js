@@ -39,6 +39,7 @@ const ids = (id) => document.getElementById(id);
 const tokenKey = "retroTetrisToken";
 const localUsersKey = "retroTetrisLocalUsers";
 const localFriendsKey = "retroTetrisLocalFriends";
+const rememberedAccountsKey = "retroTetrisRememberedAccounts";
 
 let token = localStorage.getItem(tokenKey);
 let me = null;
@@ -600,6 +601,32 @@ function saveLocalFriends(friends) {
   localStorage.setItem(localFriendsKey, JSON.stringify(friends));
 }
 
+function loadRememberedAccounts() {
+  return JSON.parse(localStorage.getItem(rememberedAccountsKey) || "[]");
+}
+
+function saveRememberedAccounts(accounts) {
+  localStorage.setItem(rememberedAccountsKey, JSON.stringify(accounts));
+}
+
+function rememberAccount(username) {
+  const name = String(username || "").trim().toLowerCase();
+  if (!name) return;
+  const accounts = loadRememberedAccounts().filter((account) => account.username !== name);
+  accounts.unshift({ username: name, lastUsed: Date.now() });
+  saveRememberedAccounts(accounts.slice(0, 12));
+  renderAccountPicker();
+}
+
+function renderAccountPicker() {
+  const select = ids("accountSelect");
+  if (!select) return;
+  const current = select.value;
+  const accounts = loadRememberedAccounts();
+  select.innerHTML = `<option value="">Saved accounts</option>${accounts.map((account) => `<option value="${escapeHtml(account.username)}">${escapeHtml(account.username)}</option>`).join("")}`;
+  if (accounts.some((account) => account.username === current)) select.value = current;
+}
+
 function localApi(path, body) {
   const users = loadLocalUsers();
   const username = String(body?.username || "").trim().toLowerCase();
@@ -633,6 +660,7 @@ async function refreshMe() {
     const username = token.replace("local:", "");
     const friends = (loadLocalFriends()[username] || []).map((name) => ({ username: name }));
     me = { username };
+    rememberAccount(username);
     ids("authForm").classList.add("hidden");
     ids("signedIn").classList.remove("hidden");
     ids("signedName").textContent = `${username} local`;
@@ -644,6 +672,7 @@ async function refreshMe() {
   if (!res.ok) return logout();
   const data = await res.json();
   me = data.user;
+  rememberAccount(me.username);
   ids("authForm").classList.add("hidden");
   ids("signedIn").classList.remove("hidden");
   ids("signedName").textContent = me.username;
@@ -666,6 +695,7 @@ function logout() {
   localStorage.removeItem(tokenKey);
   ids("authForm").classList.remove("hidden");
   ids("signedIn").classList.add("hidden");
+  renderAccountPicker();
   if (socket) socket.disconnect();
 }
 
@@ -911,6 +941,7 @@ ids("authForm").addEventListener("submit", async (event) => {
     const data = await api("/api/login", { username: ids("username").value, password: ids("password").value });
     token = data.token;
     localStorage.setItem(tokenKey, token);
+    rememberAccount(data.user.username);
     await refreshMe();
     setStatus(`Logged in as ${data.user.username}.`);
   } catch (error) { setStatus(error.message); }
@@ -921,9 +952,17 @@ ids("registerBtn").addEventListener("click", async () => {
     const data = await api("/api/register", { username: ids("username").value, password: ids("password").value });
     token = data.token;
     localStorage.setItem(tokenKey, token);
+    rememberAccount(data.user.username);
     await refreshMe();
     setStatus(`Registered ${data.user.username}.`);
   } catch (error) { setStatus(error.message); }
+});
+
+ids("accountSelect").addEventListener("change", () => {
+  const username = ids("accountSelect").value;
+  if (!username) return;
+  ids("username").value = username;
+  ids("password").focus();
 });
 
 ids("logoutBtn").addEventListener("click", logout);
@@ -1024,4 +1063,5 @@ document.body.addEventListener("click", async (event) => {
   } catch (error) { setStatus(error.message); }
 });
 
+renderAccountPicker();
 refreshMe();
