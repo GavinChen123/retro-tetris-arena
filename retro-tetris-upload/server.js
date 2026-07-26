@@ -27,6 +27,10 @@ function cleanName(username) {
   return String(username || "").trim().toLowerCase();
 }
 
+function guestName(socket) {
+  return `guest_${socket.id.slice(0, 4)}`.toLowerCase();
+}
+
 function publicUser(username) {
   const user = db.users[cleanName(username)];
   return user ? { username: user.username, createdAt: user.createdAt } : null;
@@ -283,6 +287,10 @@ function makeMatch(playerA, playerB, mode = "human") {
   playerB.socket.data.partyId = null;
   playerA.socket.data.lastOpponent = playerB.username;
   playerB.socket.data.lastOpponent = playerA.username;
+  playerA.socket.data.lastOpponentSocketId = playerB.socket.id;
+  playerB.socket.data.lastOpponentSocketId = playerA.socket.id;
+  playerA.socket.data.lastMatchMode = mode;
+  playerB.socket.data.lastMatchMode = mode;
   playerA.socket.emit("match:start", { matchId: id, mode, side: 0, opponent: playerB.username });
   playerB.socket.emit("match:start", { matchId: id, mode, side: 1, opponent: playerA.username });
 }
@@ -309,7 +317,7 @@ io.use((socket, next) => {
 });
 
 io.on("connection", (socket) => {
-  const username = socket.data.user?.username || `guest_${socket.id.slice(0, 4)}`;
+  const username = socket.data.user?.username || guestName(socket);
   socket.data.username = username;
   if (!socketsByUser.has(username)) socketsByUser.set(username, new Set());
   socketsByUser.get(username).add(socket.id);
@@ -424,13 +432,15 @@ io.on("connection", (socket) => {
     if (!match) {
       const target = cleanName(to || socket.data.lastOpponent);
       if (!target || target === username) return socket.emit("notice", { type: "error", message: "No opponent to restart with." });
-      const targetIds = socketsByUser.get(target);
-      const targetSocket = targetIds && [...targetIds].map((sid) => io.sockets.sockets.get(sid)).find(Boolean);
+      const targetSocket = io.sockets.sockets.get(socket.data.lastOpponentSocketId)
+        || [...(socketsByUser.get(target) || [])].map((sid) => io.sockets.sockets.get(sid)).find(Boolean);
       if (!targetSocket) return socket.emit("notice", { type: "error", message: `${target} is offline.` });
+      const restartMode = socket.data.lastMatchMode === "quick" ? "quick" : "challenge";
       const id = crypto.randomBytes(8).toString("hex");
       restartRequests.set(id, {
         requester: { socket, username },
-        target: { socket: targetSocket, username: target },
+        target: { socket: targetSocket, username: targetSocket.data.username || target },
+        mode: restartMode,
         timer: setTimeout(() => {
           socket.emit("notice", { type: "error", message: "Restart request expired." });
           targetSocket.emit("restart:expired", { id });
@@ -463,7 +473,7 @@ io.on("connection", (socket) => {
       const request = restartRequests.get(id);
       if (request.target.socket.id !== socket.id) return;
       clearLooseRestartRequest(id);
-      makeMatch(request.requester, request.target, "challenge");
+      makeMatch(request.requester, request.target, request.mode || "challenge");
       return;
     }
     const match = matches.get(socket.data.matchId);

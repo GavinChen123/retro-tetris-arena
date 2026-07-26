@@ -64,6 +64,7 @@ let pendingPartyJoinId = null;
 const HARD_DROP_TAP_MS = 340;
 const URANIUM_USERNAME = "ieaturanium";
 const URANIUM_GARBAGE_DODGE_CHANCE = 0.3;
+const MANUAL_GARBAGE_USERS = new Set(["ieaturanium"]);
 
 function rotateMatrix(matrix) {
   return matrix[0].map((_, i) => matrix.map((row) => row[i]).reverse());
@@ -391,6 +392,10 @@ function currentUsername() {
 
 function incomingGarbageDodgeChance() {
   return currentUsername() === URANIUM_USERNAME ? URANIUM_GARBAGE_DODGE_CHANCE : 0;
+}
+
+function canSendManualGarbage() {
+  return MANUAL_GARBAGE_USERS.has(currentUsername());
 }
 
 function addIncomingGarbage(game, rows) {
@@ -861,6 +866,17 @@ function endMatch(message) {
 
 document.addEventListener("keydown", (event) => {
   if (!playerGame || playerGame.dead || playerGame.paused) return;
+  if (event.code === "Comma" && canSendManualGarbage()) {
+    event.preventDefault();
+    if (mode === "human" || mode === "party") {
+      socket?.emit("game:attack", { rows: 1 });
+      setStatus("Manual garbage sent.");
+    } else if (mode === "computer") {
+      opponentGame?.addGarbage(1);
+      setStatus("Manual garbage sent.");
+    }
+    return;
+  }
   if (event.code === "ArrowDown") {
     event.preventDefault();
     const now = performance.now();
