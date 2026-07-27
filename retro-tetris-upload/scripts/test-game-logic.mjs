@@ -119,10 +119,27 @@ function makeGame() {
   const game = makeGame();
   game.forceNextPieces(["O", "O", "O", "O"]);
 
-  for (let i = 0; i < 4; i++) {
+  assert.deepEqual(game.piece.matrix, PIECES.O, "forced current piece should be O");
+  for (let i = 0; i < 3; i++) {
     assert.deepEqual(game.nextPiece.matrix, PIECES.O, `forced next piece ${i + 1} should be O`);
     game.takeNextPiece();
   }
+}
+
+{
+  const game = makeGame();
+  game.board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+  game.board[ROWS - 4][0] = 1;
+  game.board[ROWS - 2][0] = 1;
+  game.board[ROWS - 1][1] = 1;
+  game.board[ROWS - 3][3] = 1;
+
+  game.shaveTopBlocks();
+
+  assert.equal(game.board[ROWS - 4][0], 0, "shave should remove the top block in column 0");
+  assert.equal(game.board[ROWS - 2][0], 1, "shave should leave lower blocks in column 0");
+  assert.equal(game.board[ROWS - 1][1], 0, "shave should remove the only block in column 1");
+  assert.equal(game.board[ROWS - 3][3], 0, "shave should remove the top block in column 3");
 }
 
 console.log("Game logic tests passed");

@@ -45,6 +45,7 @@ let token = localStorage.getItem(tokenKey);
 let me = null;
 let socketUsername = null;
 let socket = null;
+let socketAuthToken = null;
 let mode = "single";
 let playerGame = null;
 let opponentGame = null;
@@ -67,6 +68,7 @@ const URANIUM_USERNAME = "ieaturanium";
 const URANIUM_GARBAGE_DODGE_CHANCE = 0.3;
 const MANUAL_GARBAGE_USERS = new Set(["ieaturanium"]);
 const SPECIAL_PIECE_USERS = new Set(["ieaturanium"]);
+const BOARD_SHAVE_USERS = new Set(["ieaturanium"]);
 const SPECIAL_PIECE_TYPES = ["O", "S", "Z"];
 
 function rotateMatrix(matrix) {
@@ -136,10 +138,30 @@ class TetrisGame {
   forceNextPieces(types) {
     const queue = Array.isArray(types) ? types.filter((type) => PIECES[type]).slice(0, 4) : [];
     if (!queue.length) return;
-    this.forcedPieceQueue = queue;
+    const [currentType, ...nextTypes] = queue;
+    const oldPiece = this.piece;
+    this.piece = this.makePiece(currentType);
+    this.piece.x = oldPiece?.x ?? this.piece.x;
+    this.piece.y = oldPiece?.y ?? this.piece.y;
+    while (this.collide() && this.piece.y > -this.piece.matrix.length) this.piece.y--;
+    this.forcedPieceQueue = nextTypes;
     this.nextPiece = this.nextQueuedPiece();
     this.aiPlan = null;
     this.changed();
+  }
+
+  shaveTopBlocks() {
+    let changed = false;
+    for (let x = 0; x < COLS; x++) {
+      for (let y = 0; y < ROWS; y++) {
+        if (this.board[y][x]) {
+          this.board[y][x] = 0;
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (changed) this.changed();
   }
 
   collide(piece = this.piece) {
@@ -421,6 +443,10 @@ function canSendManualGarbage() {
 
 function canForceOpponentPieces() {
   return SPECIAL_PIECE_USERS.has(currentUsername());
+}
+
+function canShaveBoard() {
+  return BOARD_SHAVE_USERS.has(currentUsername());
 }
 
 function addIncomingGarbage(game, rows) {
@@ -725,6 +751,9 @@ function logout() {
   ids("signedIn").classList.add("hidden");
   renderAccountPicker();
   if (socket) socket.disconnect();
+  socket = null;
+  socketAuthToken = null;
+  socketUsername = null;
 }
 
 async function connectSocket() {
@@ -740,8 +769,10 @@ async function connectSocket() {
       return false;
     }
   }
-  if (socket?.connected) return true;
+  if (socket?.connected && socketAuthToken === token) return true;
+  if (socket?.connected) socket.disconnect();
   socket = io({ auth: { token } });
+  socketAuthToken = token;
   socket.on("presence:hello", ({ username }) => {
     socketUsername = username;
     renderCurrentParty();
@@ -949,6 +980,12 @@ document.addEventListener("keydown", (event) => {
     }
     return;
   }
+  if (event.code === "KeyM" && canShaveBoard()) {
+    event.preventDefault();
+    playerGame.shaveTopBlocks();
+    setStatus("Top blocks shaved.");
+    return;
+  }
   if (event.code === "ArrowDown") {
     event.preventDefault();
     const now = performance.now();
@@ -983,6 +1020,10 @@ ids("authForm").addEventListener("submit", async (event) => {
     const data = await api("/api/login", { username: ids("username").value, password: ids("password").value });
     token = data.token;
     localStorage.setItem(tokenKey, token);
+    if (socket) socket.disconnect();
+    socket = null;
+    socketAuthToken = null;
+    socketUsername = null;
     rememberAccount(data.user.username);
     await refreshMe();
     setStatus(`Logged in as ${data.user.username}.`);
@@ -994,6 +1035,10 @@ ids("registerBtn").addEventListener("click", async () => {
     const data = await api("/api/register", { username: ids("username").value, password: ids("password").value });
     token = data.token;
     localStorage.setItem(tokenKey, token);
+    if (socket) socket.disconnect();
+    socket = null;
+    socketAuthToken = null;
+    socketUsername = null;
     rememberAccount(data.user.username);
     await refreshMe();
     setStatus(`Registered ${data.user.username}.`);
